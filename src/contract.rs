@@ -159,10 +159,10 @@ pub fn try_resolve_prediction(
     }
 
     /*
-       TODO: Query the pool LUNA-UST Terraswap
-       Calculate the current price pool
-    */
+        TODO: Probably good to cancel the auction if nobody have played
+     */
 
+    //Query the pool LUNA-UST Terraswap Calculate the current price pool
     let pool_info_msg = terraswap::pair::QueryMsg::Pool {};
     let query = WasmQuery::Smart {
         contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(),
