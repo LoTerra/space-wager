@@ -5,6 +5,7 @@ use cosmwasm_std::{
     WasmQuery,
 };
 use cw2::set_contract_version;
+use std::ops::Sub;
 use terraswap::asset::AssetInfo;
 use terraswap::pair::PoolResponse;
 
@@ -20,7 +21,7 @@ const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
@@ -36,6 +37,53 @@ pub fn instantiate(
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     STATE.save(deps.storage, &state)?;
     CONFIG.save(deps.storage, &config)?;
+
+    //Query the pool LUNA-UST Terraswap Calculate the current price pool
+    let pool_info_msg = terraswap::pair::QueryMsg::Pool {};
+    let query = WasmQuery::Smart {
+        contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(),
+        msg: to_binary(&pool_info_msg)?,
+    };
+    let pool_info: PoolResponse = deps.querier.query(&query.into())?;
+
+    let luna_asset = pool_info
+        .assets
+        .iter()
+        .find(|&a| match a.info.clone() {
+            AssetInfo::Token { .. } => false,
+            AssetInfo::NativeToken { denom } => denom == "uluna",
+        })
+        .unwrap();
+
+    let ust_asset = pool_info
+        .assets
+        .iter()
+        .find(|&a| match a.info.clone() {
+            AssetInfo::Token { .. } => false,
+            AssetInfo::NativeToken { denom } => denom == "uusd",
+        })
+        .unwrap();
+    let predicted_price =
+        Uint128::from(1_000_000_u128).multiply_ratio(ust_asset.amount, luna_asset.amount);
+
+    PREDICTIONS.save(
+        deps.storage,
+        &state.round.to_be_bytes(),
+        &Prediction {
+            up: Uint128::zero(),
+            down: Uint128::zero(),
+            locked_price: predicted_price,
+            closing_time: env.block.time.plus_seconds(msg.round_time).seconds(),
+            expire_time: env
+                .block
+                .time
+                .plus_seconds(msg.round_time)
+                .plus_seconds(msg.limit_time)
+                .seconds(),
+            success: false,
+            is_up: None,
+        },
+    )?;
 
     Ok(Response::new()
         .add_attribute("method", "instantiate")
@@ -83,54 +131,57 @@ pub fn try_make_prediction(
         (&raw_sender.as_slice(), &state.round.to_be_bytes()),
     )? {
         None => {
-            if up {
-                GAMES.save(
-                    deps.storage,
-                    (&raw_sender.as_slice(), &state.round.to_be_bytes()),
-                    &Game {
-                        up: sent,
-                        down: Uint128::zero(),
-                        prize: Uint128::zero(),
-                        resolved: false,
-                    },
-                )?;
+            let game = if up {
+                Game {
+                    up: sent,
+                    down: Uint128::zero(),
+                    prize: Uint128::zero(),
+                    resolved: false,
+                }
             } else {
-                GAMES.save(
-                    deps.storage,
-                    (&raw_sender.as_slice(), &state.round.to_be_bytes()),
-                    &Game {
-                        up: Uint128::zero(),
-                        down: sent,
-                        prize: Uint128::zero(),
-                        resolved: false,
-                    },
-                )?;
-            }
+                Game {
+                    up: Uint128::zero(),
+                    down: sent,
+                    prize: Uint128::zero(),
+                    resolved: false,
+                }
+            };
+            GAMES.save(
+                deps.storage,
+                (&raw_sender.as_slice(), &state.round.to_be_bytes()),
+                &game,
+            )?;
         }
         Some(_) => {
-            if up {
-                GAMES.update(
-                    deps.storage,
-                    (&raw_sender.as_slice(), &state.round.to_be_bytes()),
-                    |game| -> Result<Game, ContractError> {
-                        let mut update_game = game.unwrap();
+            GAMES.update(
+                deps.storage,
+                (&raw_sender.as_slice(), &state.round.to_be_bytes()),
+                |game| -> Result<Game, ContractError> {
+                    let mut update_game = game.unwrap();
+                    if up {
                         update_game.up += sent;
-                        Ok(update_game)
-                    },
-                )?;
-            } else {
-                GAMES.update(
-                    deps.storage,
-                    (&raw_sender.as_slice(), &state.round.to_be_bytes()),
-                    |game| -> Result<Game, ContractError> {
-                        let mut update_game = game.unwrap();
+                    } else {
                         update_game.down += sent;
-                        Ok(update_game)
-                    },
-                )?;
-            }
+                    }
+                    Ok(update_game)
+                },
+            )?;
         }
     };
+
+    PREDICTIONS.update(
+        deps.storage,
+        &state.round.to_be_bytes(),
+        |prediction| -> Result<_, ContractError> {
+            let mut update_prediction = prediction.unwrap();
+            if up {
+                update_prediction.up += sent;
+            } else {
+                update_prediction.down += sent
+            }
+            Ok(update_prediction)
+        },
+    )?;
 
     let direction = match up {
         true => "up",
@@ -197,7 +248,9 @@ pub fn try_resolve_prediction(
         Uint128::from(1_000_000_u128).multiply_ratio(ust_asset.amount, luna_asset.amount);
 
     // Check if not expired and prediction up and down are not zero
-    let is_success = env.block.time.seconds() > prediction.expire_time
+    println!("{}", env.block.time.seconds() < prediction.expire_time);
+    println!("{}, {}", prediction.up, prediction.down);
+    let is_success = env.block.time.seconds() < prediction.expire_time
         && !prediction.up.is_zero()
         && !prediction.down.is_zero();
     let is_up = predicted_price > prediction.locked_price;
@@ -237,7 +290,19 @@ pub fn try_resolve_prediction(
         },
     )?;
 
-    Ok(Response::new().add_attribute("method", "reset"))
+    let direction = match is_up {
+        true => "up",
+        false => "down",
+    };
+    Ok(Response::new()
+        .add_attribute("action", "resolve_prediction")
+        .add_attribute("locked_price", predicted_price.to_string())
+        .add_attribute("is_success", is_success.to_string())
+        .add_attribute("resolved", direction.to_string())
+        .add_attribute(
+            "prediction_id",
+            state.round.checked_sub(1).unwrap().to_string(),
+        ))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -260,13 +325,18 @@ fn query_prediction(deps: Deps, round: u64) -> StdResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mock_querier::mock_dependencies_custom;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::{attr, coins, from_binary, Api, Attribute, Coin};
+    use std::ops::Add;
 
     #[test]
     fn proper_initialization() {
-        let mut deps = mock_dependencies(&[]);
-
+        let mut deps = mock_dependencies_custom(&[]);
+        deps.querier.pool_token(
+            Uint128::new(10_250_000_000u128),
+            Uint128::new(955_000_000u128),
+        );
         let msg = InstantiateMsg {
             pool_address: "terraswap".to_string(),
             round_time: 300,
@@ -279,6 +349,27 @@ mod tests {
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());
 
+        let prediction = PREDICTIONS
+            .load(deps.as_ref().storage, &0_u64.to_be_bytes())
+            .unwrap();
+        assert_eq!(prediction.down, Uint128::zero());
+        assert_eq!(prediction.up, Uint128::zero());
+        assert_eq!(
+            prediction.closing_time,
+            mock_env().block.time.plus_seconds(300).seconds()
+        );
+        assert_eq!(
+            prediction.expire_time,
+            mock_env()
+                .block
+                .time
+                .plus_seconds(300)
+                .plus_seconds(30)
+                .seconds()
+        );
+        assert!(!prediction.success);
+        assert_eq!(prediction.is_up, None);
+        assert_eq!(prediction.locked_price, Uint128::from(10_732_984u128));
         // it worked, let's query the state
         // let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
         // let value: CountResponse = from_binary(&res).unwrap();
@@ -412,7 +503,11 @@ mod tests {
 
     #[test]
     fn proper_resolve_prediction() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = mock_dependencies_custom(&[]);
+        deps.querier.pool_token(
+            Uint128::new(10_250_000_000u128),
+            Uint128::new(955_000_000u128),
+        );
 
         let msg = InstantiateMsg {
             pool_address: "terraswap".to_string(),
@@ -423,6 +518,10 @@ mod tests {
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
+        deps.querier.pool_token(
+            Uint128::new(15_250_000_000u128),
+            Uint128::new(555_000_000u128),
+        );
         // Player1 enter down
         let msg = ExecuteMsg::MakePrediction { up: false };
         let info = mock_info(
@@ -458,8 +557,20 @@ mod tests {
 
         // Resolve prediction
         let msg = ExecuteMsg::ResolvePrediction {};
-        let err = execute(deps.as_mut(), mock_env(), mock_info("bot", &[]), msg).unwrap_err();
-        assert_eq!(err, ContractError::PredictionStillInProgress {})
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("bot", &[]),
+            msg.clone(),
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::PredictionStillInProgress {});
+
+        let config = CONFIG.load(deps.as_ref().storage).unwrap();
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(config.round_time);
+        let res = execute(deps.as_mut(), env, mock_info("bot", &[]), msg).unwrap();
+        println!("{:?}", res);
     }
 
     // #[test]

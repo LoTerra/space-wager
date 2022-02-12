@@ -103,7 +103,7 @@ impl WasmMockQuerier {
         }
     }
     // configure the mint whitelist mock querier
-    pub fn rebase_token(&mut self, amount_native: Uint128, amount_token: Uint128) {
+    pub fn pool_token(&mut self, amount_native: Uint128, amount_token: Uint128) {
         self.pool_response = PoolInfoResponse::new(amount_native, amount_token)
     }
 }
