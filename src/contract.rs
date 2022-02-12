@@ -1,11 +1,13 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{
+    to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128,
+};
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
 use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{State, STATE};
+use crate::state::{Config, Game, State, CONFIG, GAMES, STATE};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:space-wager";
@@ -18,39 +20,114 @@ pub fn instantiate(
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
-    let state = State {
-        count: msg.count,
-        owner: info.sender.clone(),
+    let state = State { round: 0 };
+
+    let config = Config {
+        pool_address: deps.api.addr_canonicalize(msg.pool_address.as_str())?,
+        round_time: msg.round_time,
+        limit_time: msg.limit_time,
+        denom: msg.denom,
     };
+
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     STATE.save(deps.storage, &state)?;
+    CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::new()
         .add_attribute("method", "instantiate")
-        .add_attribute("owner", info.sender)
-        .add_attribute("count", msg.count.to_string()))
+        .add_attribute("owner", info.sender))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Increment {} => try_increment(deps),
-        ExecuteMsg::Reset { count } => try_reset(deps, info, count),
+        ExecuteMsg::MakePrediction { up } => try_make_prediction(deps, env, info, up),
+        ExecuteMsg::Resolve { address, round } => {
+            try_collect_prize(deps, env, info, address, round)
+        }
+        ExecuteMsg::FinishAndStartNewRound {} => try_finish_and_start_new_round(deps, env, info),
     }
 }
 
-pub fn try_increment(deps: DepsMut) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        state.count += 1;
-        Ok(state)
-    })?;
+pub fn try_make_prediction(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    up: bool,
+) -> Result<Response, ContractError> {
+    let state = STATE.load(deps.storage)?;
+    let raw_sender = deps.api.addr_canonicalize(&info.sender.as_str())?;
+    let sent = match info.funds.len() {
+        0 => Err(ContractError::EmptyFunds {}),
+        1 => {
+            if info.funds[0].denom != config.denom {
+                return Err(ContractError::WrongDenom {});
+            }
+            Ok(info.funds[0].amount)
+        }
+        _ => Err(ContractError::MultipleDenoms {}),
+    }?;
 
-    Ok(Response::new().add_attribute("method", "try_increment"))
+    match GAMES.may_load(
+        deps.storage,
+        (&raw_sender.as_slice(), &state.round.to_be_bytes()),
+    )? {
+        None => {
+            if up {
+                GAMES.save(
+                    deps.storage,
+                    (&raw_sender.as_slice(), &state.round.to_be_bytes()),
+                    &Game {
+                        up: sent,
+                        down: Uint128::zero(),
+                        prize: Uint128::zero(),
+                        resolved: false,
+                    },
+                )
+            } else {
+                GAMES.save(
+                    deps.storage,
+                    (&raw_sender.as_slice(), &state.round.to_be_bytes()),
+                    &Game {
+                        up: Uint128::zero(),
+                        down: sent,
+                        prize: Uint128::zero(),
+                        resolved: false,
+                    },
+                )
+            }
+        }
+        Some(_) => {
+            if up {
+                GAMES.update(
+                    deps.storage,
+                    (&raw_sender.as_slice(), &state.round.to_be_bytes()),
+                    |game| -> Result<Game, ContractError> {
+                        let mut update_game = game?;
+                        update_game.up += sent;
+                        Ok(update_game)
+                    },
+                )
+            } else {
+                GAMES.update(
+                    deps.storage,
+                    (&raw_sender.as_slice(), &state.round.to_be_bytes()),
+                    |game| -> Result<Game, ContractError> {
+                        let mut update_game = game?;
+                        update_game.down += sent;
+                        Ok(update_game)
+                    },
+                )
+            }
+        }
+    };
+
+    Ok(Response::new().add_attribute("action", "make_prediction"))
 }
 pub fn try_reset(deps: DepsMut, info: MessageInfo, count: i32) -> Result<Response, ContractError> {
     STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {

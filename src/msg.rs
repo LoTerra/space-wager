@@ -3,21 +3,30 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
-    pub count: i32,
+    pub pool_address: String,
+    pub round_time: u64,
+    pub limit_time: u64,
+    pub denom: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    Increment {},
-    Reset { count: i32 },
+    /// Make a prediction on the current round
+    MakePrediction { up: bool },
+    /// Resolve will collect prize or refund if prediction fail
+    Resolve { address: String, round: Vec<u64> },
+    /// Finish round will start a new round
+    FinishAndStartNewRound {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
-    // GetCount returns the current count as a json-encoded number
-    GetCount {},
+    /// Retrieve game of an address and round
+    Game { address: String, round: u64 },
+    /// Retrieve a prediction for info
+    Prediction { round: u64 },
 }
 
 // We define a custom struct for each query response
