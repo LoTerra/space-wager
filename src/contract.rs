@@ -2,12 +2,16 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128,
+    WasmQuery,
 };
 use cw2::set_contract_version;
+use terraswap::asset::AssetInfo;
+use terraswap::pair::PoolResponse;
 
 use crate::error::ContractError;
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{Config, Game, State, CONFIG, GAMES, STATE};
+use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg, TerraSwapQueryMsg};
+
+use crate::state::{Config, Game, Prediction, State, CONFIG, GAMES, PREDICTIONS, STATE};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:space-wager";
@@ -47,10 +51,10 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::MakePrediction { up } => try_make_prediction(deps, env, info, up),
-        ExecuteMsg::Resolve { address, round } => {
-            try_collect_prize(deps, env, info, address, round)
+        ExecuteMsg::ResolveGame { address, round } => {
+            try_resolve_game(deps, env, info, address, round)
         }
-        ExecuteMsg::FinishAndStartNewRound {} => try_finish_and_start_new_round(deps, env, info),
+        ExecuteMsg::ResolvePrediction {} => try_resolve_prediction(deps, env, info),
     }
 }
 
@@ -129,14 +133,111 @@ pub fn try_make_prediction(
 
     Ok(Response::new().add_attribute("action", "make_prediction"))
 }
-pub fn try_reset(deps: DepsMut, info: MessageInfo, count: i32) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        if info.sender != state.owner {
-            return Err(ContractError::Unauthorized {});
-        }
-        state.count = count;
-        Ok(state)
-    })?;
+
+pub fn try_resolve_game(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    address: String,
+    round: Vec<u64>,
+) -> Result<Response, ContractError> {
+    Ok(Response::new())
+}
+
+pub fn try_resolve_prediction(
+    deps: DepsMut,
+    env: Env,
+    _info: MessageInfo,
+) -> Result<Response, ContractError> {
+    let mut state = STATE.load(deps.storage)?;
+    let config = CONFIG.load(deps.storage)?;
+    let prediction = PREDICTIONS.load(deps.storage, &state.round.to_be_bytes())?;
+
+    // Check if the round is open to be resolved
+    if prediction.closing_time > env.block.time.seconds() {
+        return Err(ContractError::PredictionStillInProgress {});
+    }
+
+    /*
+       TODO: Query the pool LUNA-UST Terraswap
+       Calculate the current price pool
+    */
+
+    let pool_info_msg = terraswap::pair::QueryMsg::Pool {};
+    let query = WasmQuery::Smart {
+        contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(),
+        msg: to_binary(&pool_info_msg)?,
+    };
+    let pool_info: PoolResponse = deps.querier.query(&query.into())?;
+
+    let luna_asset = pool_info
+        .assets
+        .iter()
+        .find(|&a| match a.info {
+            AssetInfo::Token { .. } => false,
+            AssetInfo::NativeToken { .. } => {
+                if denom == "uluna" {
+                    true
+                }
+            }
+        })
+        .unwrap();
+
+    let ust_asset = pool_info
+        .assets
+        .iter()
+        .find(|&a| match a.info.clone() {
+            AssetInfo::Token { .. } => false,
+            AssetInfo::NativeToken { denom } => {
+                if denom == "uusd" {
+                    true
+                }
+            }
+        })
+        .unwrap();
+
+    let predicted_price =
+        Uint128::from(1_000_000_u128).multiply_ratio(ust_asset.amount, luna_asset.amount);
+
+    // Update the current prediction
+    let is_success = env.block.time.seconds() > prediction.expire_time;
+    let is_up = predicted_price > prediction.locked_price;
+
+    PREDICTIONS.update(
+        deps.storage,
+        &state.round.to_be_bytes(),
+        |prediction| -> Result<_, ContractError> {
+            let mut update_prediction = prediction?;
+            update_prediction.is_up = Some(is_up);
+            update_prediction.success = is_success;
+            Ok(update_prediction)
+        },
+    )?;
+
+    // Increment the round
+    state.round += 1;
+    STATE.save(deps.storage, &state)?;
+
+    // Create a new prediction with incremented round
+    PREDICTIONS.save(
+        deps.storage,
+        &state.round.to_be_bytes(),
+        &Prediction {
+            up: Uint128::zero(),
+            down: Uint128::zero(),
+            locked_price: predicted_price,
+            closing_time: env.block.time.plus_seconds(config.round_time).seconds(),
+            expire_time: env
+                .block
+                .time
+                .plus_seconds(config.round_time)
+                .plus_seconds(config.limit_time)
+                .seconds(),
+            success: false,
+            is_up: None,
+        },
+    )?;
+
     Ok(Response::new().add_attribute("method", "reset"))
 }
 

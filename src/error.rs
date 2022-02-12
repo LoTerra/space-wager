@@ -14,6 +14,9 @@ pub enum ContractError {
 
     #[error("Multiple denom not allowed")]
     MultipleDenoms {},
+
+    #[error("Prediction are still in progress")]
+    PredictionStillInProgress {},
     // Add any other custom errors you like here.
     // Look at https://docs.rs/thiserror/1.0.21/thiserror/ for details.
 }

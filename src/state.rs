@@ -28,6 +28,7 @@ pub struct Prediction {
     pub closing_time: u64,
     pub expire_time: u64,
     pub success: bool,
+    pub is_up: Option<bool>,
 }
 
 pub const PREDICTIONS: Map<&[u8], Prediction> = Map::new("predictions");

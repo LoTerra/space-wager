@@ -15,9 +15,9 @@ pub enum ExecuteMsg {
     /// Make a prediction on the current round
     MakePrediction { up: bool },
     /// Resolve will collect prize or refund if prediction fail
-    Resolve { address: String, round: Vec<u64> },
+    ResolveGame { address: String, round: Vec<u64> },
     /// Finish round will start a new round
-    FinishAndStartNewRound {},
+    ResolvePrediction {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
