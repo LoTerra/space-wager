@@ -23,6 +23,10 @@ pub enum ExecuteMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
+    /// Retrieve the state
+    State {},
+    /// Retrieve the config
+    Config {},
     /// Retrieve game of an address and round
     Game { address: String, round: u64 },
     /// Retrieve a prediction for info
@@ -31,6 +35,14 @@ pub enum QueryMsg {
 
 // We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct CountResponse {
-    pub count: i32,
+pub struct StateResponse {
+    pub round: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ConfigResponse {
+    pub pool_address: String,
+    pub round_time: u64,
+    pub limit_time: u64,
+    pub denom: String,
 }

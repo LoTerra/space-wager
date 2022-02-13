@@ -10,7 +10,7 @@ use terraswap::asset::AssetInfo;
 use terraswap::pair::PoolResponse;
 
 use crate::error::ContractError;
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, StateResponse};
 
 use crate::state::{Config, Game, Prediction, State, CONFIG, GAMES, PREDICTIONS, STATE};
 
@@ -259,7 +259,9 @@ pub fn try_resolve_prediction(
         &state.round.to_be_bytes(),
         |prediction| -> Result<_, ContractError> {
             let mut update_prediction = prediction.unwrap();
-            update_prediction.is_up = Some(is_up);
+            if is_success {
+                update_prediction.is_up = Some(is_up);
+            }
             update_prediction.success = is_success;
             Ok(update_prediction)
         },
@@ -312,11 +314,29 @@ pub fn try_resolve_prediction(
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Game { address, round } => to_binary(&query_game(deps, address, round)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::State {} => to_binary(&query_state(deps)?),
+        QueryMsg::Game { address, round } => {
+            to_binary(&query_game(deps, address, round)?)
+        }
         QueryMsg::Prediction { round } => to_binary(&query_prediction(deps, round)?),
     }
 }
 
+fn query_state(deps: Deps) -> StdResult<StateResponse> {
+    let state = STATE.load(deps.storage)?;
+    Ok(StateResponse{ round: state.round})
+
+}
+fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+    let config = CONFIG.load(deps.storage)?;
+    Ok(ConfigResponse{
+        pool_address: deps.api.addr_humanize(&config.pool_address)?.to_string(),
+        round_time: config.round_time,
+        limit_time: config.limit_time,
+        denom: config.denom
+    })
+}
 fn query_game(deps: Deps, address: String, round: u64) -> StdResult<()> {
     let state = STATE.load(deps.storage)?;
     Ok(())
@@ -598,7 +618,7 @@ mod tests {
         /*
            Check state
         */
-        let state = STATE.load(deps.as_ref().storage).unwrap();
+        let state = query_state(deps.as_ref()).unwrap();
         assert_eq!(state.round, 1);
 
         deps.querier.pool_token(
