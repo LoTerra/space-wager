@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128,
-    WasmQuery,
+    to_binary, Addr, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+    Uint128, WasmQuery,
 };
 use cw2::set_contract_version;
 use std::ops::Sub;
@@ -191,7 +191,8 @@ pub fn try_make_prediction(
     Ok(Response::new()
         .add_attribute("action", "make_prediction")
         .add_attribute("entered", direction.to_string())
-        .add_attribute("committed", sent.to_string()))
+        .add_attribute("committed", sent.to_string())
+        .add_attribute("prediction_id", state.round.to_string()))
 }
 
 pub fn try_resolve_game(
@@ -248,8 +249,6 @@ pub fn try_resolve_prediction(
         Uint128::from(1_000_000_u128).multiply_ratio(ust_asset.amount, luna_asset.amount);
 
     // Check if not expired and prediction up and down are not zero
-    println!("{}", env.block.time.seconds() < prediction.expire_time);
-    println!("{}, {}", prediction.up, prediction.down);
     let is_success = env.block.time.seconds() < prediction.expire_time
         && !prediction.up.is_zero()
         && !prediction.down.is_zero();
@@ -294,15 +293,20 @@ pub fn try_resolve_prediction(
         true => "up",
         false => "down",
     };
-    Ok(Response::new()
+    let mut res = Response::new()
         .add_attribute("action", "resolve_prediction")
         .add_attribute("locked_price", predicted_price.to_string())
         .add_attribute("is_success", is_success.to_string())
-        .add_attribute("resolved", direction.to_string())
         .add_attribute(
             "prediction_id",
             state.round.checked_sub(1).unwrap().to_string(),
-        ))
+        );
+    if is_success {
+        res.attributes
+            .push(Attribute::new("resolved", direction.to_string()));
+    }
+
+    Ok(res)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -378,8 +382,11 @@ mod tests {
 
     #[test]
     fn proper_make_prediction() {
-        let mut deps = mock_dependencies(&[]);
-
+        let mut deps = mock_dependencies_custom(&[]);
+        deps.querier.pool_token(
+            Uint128::new(10_250_000_000u128),
+            Uint128::new(955_000_000u128),
+        );
         let msg = InstantiateMsg {
             pool_address: "terraswap".to_string(),
             round_time: 300,
@@ -499,6 +506,13 @@ mod tests {
         assert_eq!(game.down, Uint128::from(100_000_000u128));
         assert_eq!(game.resolved, false);
         assert_eq!(game.prize, Uint128::zero());
+
+        // Query prediction
+        let prediction = PREDICTIONS
+            .load(deps.as_ref().storage, &0_u64.to_be_bytes())
+            .unwrap();
+        assert_eq!(prediction.down, Uint128::from(200_000_000u128));
+        assert_eq!(prediction.up, Uint128::from(500_000_000u128));
     }
 
     #[test]
@@ -569,8 +583,53 @@ mod tests {
         let config = CONFIG.load(deps.as_ref().storage).unwrap();
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(config.round_time);
-        let res = execute(deps.as_mut(), env, mock_info("bot", &[]), msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
+        assert_eq!(
+            res.attributes,
+            vec![
+                Attribute::new("action", "resolve_prediction"),
+                Attribute::new("locked_price", "27477477"),
+                Attribute::new("is_success", "true"),
+                Attribute::new("prediction_id", "0"),
+                Attribute::new("resolved", "up")
+            ]
+        );
+
+        /*
+           Check state
+        */
+        let state = STATE.load(deps.as_ref().storage).unwrap();
+        assert_eq!(state.round, 1);
+
+        deps.querier.pool_token(
+            Uint128::new(16_250_000_000u128),
+            Uint128::new(455_000_000u128),
+        );
+        // Player1 enter down
+        let msg = ExecuteMsg::MakePrediction { up: false };
+        let info = mock_info(
+            "player1",
+            &[Coin {
+                denom: "uusd".to_string(),
+                amount: Uint128::from(100_000_000u128),
+            }],
+        );
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
         println!("{:?}", res);
+
+        // Resolve
+        env.block.time = env.block.time.plus_seconds(config.round_time);
+        let msg = ExecuteMsg::ResolvePrediction {};
+        let res = execute(deps.as_mut(), env, mock_info("bot", &[]), msg).unwrap();
+        assert_eq!(
+            res.attributes,
+            vec![
+                Attribute::new("action", "resolve_prediction"),
+                Attribute::new("locked_price", "35714285"),
+                Attribute::new("is_success", "false"),
+                Attribute::new("prediction_id", "1")
+            ]
+        );
     }
 
     // #[test]
