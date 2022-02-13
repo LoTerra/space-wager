@@ -202,6 +202,29 @@ pub fn try_resolve_game(
     address: String,
     round: Vec<u64>,
 ) -> Result<Response, ContractError> {
+    let state = STATE.load(deps.storage)?;
+    let config = CONFIG.load(deps.storage)?;
+    let raw_address = deps.api.addr_canonicalize(&address)?;
+    let mut amount = Uint128::zero();
+    for round_number in round {
+        let prediction = PREDICTIONS.load(deps.storage, &round_number.to_be_bytes())?;
+        let game = GAMES.load(deps.storage, (&raw_address, &round_number.to_be_bytes()))?;
+
+        if prediction.success {
+            if prediction.is_up {
+
+            }else{
+
+            }
+        }else {
+            // Refund
+            amount += game.down.checked_add(game.up).unwrap();
+            /*
+                TODO: Update game as resolved
+             */
+        }
+    }
+
     Ok(Response::default())
 }
 
