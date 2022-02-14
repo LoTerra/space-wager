@@ -3,7 +3,7 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
-use space_wager::msg::{ConfigResponse, StateResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use space_wager::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, StateResponse};
 use space_wager::state::State;
 
 fn main() {

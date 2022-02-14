@@ -38,43 +38,14 @@ pub fn instantiate(
     STATE.save(deps.storage, &state)?;
     CONFIG.save(deps.storage, &config)?;
 
-    //Query the pool LUNA-UST Terraswap Calculate the current price pool
-    let pool_info_msg = terraswap::pair::QueryMsg::Pool {};
-    let query = WasmQuery::Smart {
-        contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(),
-        msg: to_binary(&pool_info_msg)?,
-    };
-    let pool_info: PoolResponse = deps.querier.query(&query.into())?;
-
-    let luna_asset = pool_info
-        .assets
-        .iter()
-        .find(|&a| match a.info.clone() {
-            AssetInfo::Token { .. } => false,
-            AssetInfo::NativeToken { denom } => denom == "uluna",
-        })
-        .unwrap();
-
-    let ust_asset = pool_info
-        .assets
-        .iter()
-        .find(|&a| match a.info.clone() {
-            AssetInfo::Token { .. } => false,
-            AssetInfo::NativeToken { denom } => denom == "uusd",
-        })
-        .unwrap();
-    let predicted_price =
-        Uint128::from(1_000_000_u128).multiply_ratio(ust_asset.amount, luna_asset.amount);
-
     PREDICTIONS.save(
         deps.storage,
         &state.round.to_be_bytes(),
         &Prediction {
             up: Uint128::zero(),
             down: Uint128::zero(),
-            locked_price: predicted_price,
+            locked_price: Uint128::zero(),
             closing_time: env.block.time.plus_seconds(msg.round_time).seconds(),
-            resolve_time: env.block.time.plus_seconds(msg.round_time).plus_seconds(msg.round_time).seconds(),
             expire_time: env
                 .block
                 .time
@@ -275,6 +246,7 @@ pub fn try_resolve_prediction(
 
     let mut res = Response::new();
 
+    // Resolve the past prediction
     if state.round != 0 {
         let prediction = PREDICTIONS.load(deps.storage, &(state.round - 1).to_be_bytes())?;
         // Check if not expired and prediction up and down are not zero
@@ -285,7 +257,7 @@ pub fn try_resolve_prediction(
         // Update the current prediction
         PREDICTIONS.update(
             deps.storage,
-            &state.round.to_be_bytes(),
+            &(state.round - 1).to_be_bytes(),
             |prediction| -> Result<_, ContractError> {
                 let mut update_prediction = prediction.unwrap();
                 if is_success {
@@ -300,16 +272,34 @@ pub fn try_resolve_prediction(
             true => "up",
             false => "down",
         };
-        res.attributes.push(Attribute::new("prediction_id", (state.round - 1).to_string()));
-        res.attributes.push(Attribute::new("locked_price", predicted_price.to_string()));
-        res.attributes.push(Attribute::new("is_success", is_success.to_string()));
+        res.attributes.push(Attribute::new(
+            "prediction_id",
+            (state.round - 1).to_string(),
+        ));
+        res.attributes
+            .push(Attribute::new("locked_price", predicted_price.to_string()));
+        res.attributes
+            .push(Attribute::new("is_success", is_success.to_string()));
 
         if is_success {
             res.attributes
                 .push(Attribute::new("resolved", direction.to_string()));
         }
     }
-    res.attributes.push(Attribute::new("action", "resolve_prediction"));
+    res.attributes
+        .push(Attribute::new("action", "resolve_prediction"));
+
+    // Update locked price of the current prediction
+    PREDICTIONS.update(
+        deps.storage,
+        &state.round.to_be_bytes(),
+        |prediction| -> Result<_, ContractError> {
+            let mut update_prediction = prediction.unwrap();
+            update_prediction.locked_price = predicted_price;
+            Ok(update_prediction)
+        },
+    )?;
+
     // Increment the round
     state.round += 1;
     STATE.save(deps.storage, &state)?;
@@ -321,10 +311,13 @@ pub fn try_resolve_prediction(
         &Prediction {
             up: Uint128::zero(),
             down: Uint128::zero(),
-            locked_price: predicted_price,
+            locked_price: Uint128::zero(),
             closing_time: env.block.time.plus_seconds(config.round_time).seconds(),
-            resolve_time: env.block.time.plus_seconds(config.round_time).plus_seconds(config.round_time).seconds(),
-            expire_time: env.block.time.plus_seconds(config.round_time).plus_seconds(config.round_time)
+            expire_time: env
+                .block
+                .time
+                .plus_seconds(config.round_time)
+                .plus_seconds(config.round_time)
                 .plus_seconds(config.limit_time)
                 .seconds(),
             success: false,
@@ -340,25 +333,22 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::State {} => to_binary(&query_state(deps)?),
-        QueryMsg::Game { address, round } => {
-            to_binary(&query_game(deps, address, round)?)
-        }
+        QueryMsg::Game { address, round } => to_binary(&query_game(deps, address, round)?),
         QueryMsg::Prediction { round } => to_binary(&query_prediction(deps, round)?),
     }
 }
 
 fn query_state(deps: Deps) -> StdResult<StateResponse> {
     let state = STATE.load(deps.storage)?;
-    Ok(StateResponse{ round: state.round})
-
+    Ok(StateResponse { round: state.round })
 }
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
-    Ok(ConfigResponse{
+    Ok(ConfigResponse {
         pool_address: deps.api.addr_humanize(&config.pool_address)?.to_string(),
         round_time: config.round_time,
         limit_time: config.limit_time,
-        denom: config.denom
+        denom: config.denom,
     })
 }
 fn query_game(deps: Deps, address: String, round: u64) -> StdResult<()> {
@@ -412,12 +402,13 @@ mod tests {
                 .block
                 .time
                 .plus_seconds(300)
+                .plus_seconds(300)
                 .plus_seconds(30)
                 .seconds()
         );
         assert!(!prediction.success);
         assert_eq!(prediction.is_up, None);
-        assert_eq!(prediction.locked_price, Uint128::from(10_732_984u128));
+        assert_eq!(prediction.locked_price, Uint128::zero());
         // it worked, let's query the state
         // let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
         // let value: CountResponse = from_binary(&res).unwrap();
@@ -460,7 +451,8 @@ mod tests {
             vec![
                 Attribute::new("action", "make_prediction"),
                 Attribute::new("entered", "down"),
-                Attribute::new("committed", "100000000")
+                Attribute::new("committed", "100000000"),
+                Attribute::new("prediction_id", "0")
             ]
         );
         // Query the game
@@ -495,7 +487,8 @@ mod tests {
             vec![
                 Attribute::new("action", "make_prediction"),
                 Attribute::new("entered", "up"),
-                Attribute::new("committed", "500000000")
+                Attribute::new("committed", "500000000"),
+                Attribute::new("prediction_id", "0")
             ]
         );
 
@@ -531,7 +524,8 @@ mod tests {
             vec![
                 Attribute::new("action", "make_prediction"),
                 Attribute::new("entered", "down"),
-                Attribute::new("committed", "100000000")
+                Attribute::new("committed", "100000000"),
+                Attribute::new("prediction_id", "0")
             ]
         );
 
