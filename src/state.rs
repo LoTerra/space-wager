@@ -26,6 +26,7 @@ pub struct Prediction {
     pub down: Uint128,
     pub locked_price: Uint128,
     pub closing_time: u64,
+    pub resolve_time: u64,
     pub expire_time: u64,
     pub success: bool,
     pub is_up: Option<bool>,
