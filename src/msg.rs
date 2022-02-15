@@ -1,3 +1,4 @@
+use cosmwasm_std::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +8,7 @@ pub struct InstantiateMsg {
     pub round_time: u64,
     pub limit_time: u64,
     pub denom: String,
+    pub collector_ratio: Decimal
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -31,6 +33,10 @@ pub enum QueryMsg {
     Game { address: String, round: u64 },
     /// Retrieve a prediction for info
     Prediction { round: u64 },
+    /// Retrieve all predictions for info
+    Predictions { start_after: Option<u64>, limit: Option<u64>},
+    // /// Retrieve all games
+    // Games { start_after: Option<u64>, limit: Option<u64> },
 }
 
 // We define a custom struct for each query response

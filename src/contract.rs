@@ -1,11 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{
-    to_binary, Addr, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-    Uint128, WasmQuery,
-};
+use cosmwasm_std::{to_binary, Addr, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128, WasmQuery, Decimal};
 use cw2::set_contract_version;
-use std::ops::Sub;
+use std::ops::{Mul, Sub};
 use terraswap::asset::AssetInfo;
 use terraswap::pair::PoolResponse;
 
@@ -32,6 +29,7 @@ pub fn instantiate(
         round_time: msg.round_time,
         limit_time: msg.limit_time,
         denom: msg.denom,
+        collector_fee: msg.collector_ratio
     };
 
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -179,24 +177,46 @@ pub fn try_resolve_game(
     let config = CONFIG.load(deps.storage)?;
     let raw_address = deps.api.addr_canonicalize(&address)?;
     let mut amount = Uint128::zero();
-    // for round_number in round {
-    //     let prediction = PREDICTIONS.load(deps.storage, &round_number.to_be_bytes())?;
-    //     let game = GAMES.load(deps.storage, (&raw_address, &round_number.to_be_bytes()))?;
-    //
-    //     if prediction.success {
-    //         if prediction.is_up {
-    //
-    //         }else{
-    //
-    //         }
-    //     }else {
-    //         // Refund
-    //         amount += game.down.checked_add(game.up).unwrap();
-    //         /*
-    //             TODO: Update game as resolved
-    //          */
-    //     }
-    // }
+    //let fee = Uint128::from(1).checked_sub(config.collector_fee);
+
+    for round_number in round {
+        let prediction = PREDICTIONS.load(deps.storage, &round_number.to_be_bytes())?;
+        let game = GAMES.load(deps.storage, (&raw_address, &round_number.to_be_bytes()))?;
+        let mut round_prize = Uint128::zero();
+
+        if prediction.success {
+            if let Some(is_up) = prediction.is_up {
+                if is_up {
+                    if !game.up.is_zero() {
+                        let up_ratio = Decimal::from_ratio(prediction.up.checked_add(prediction.down).unwrap(), prediction.up);
+                        let payout = game.up.mul(up_ratio);
+                        round_prize = payout;
+                        amount += payout;
+                    }
+                }else{
+                    if !game.down.is_zero() {
+                        let down_ratio = Decimal::from_ratio(prediction.up.checked_add(prediction.down).unwrap(), prediction.down);
+                        let payout = game.down.mul(down_ratio);
+                        round_prize = payout;
+                        amount += payout;
+                    }
+                }
+            }
+
+        }else {
+            round_prize = game.down.checked_add(game.up).unwrap();
+            // Refund
+            amount += game.down.checked_add(game.up).unwrap();
+
+        }
+
+        // Update game as resolved
+        GAMES.update(deps.storage, (&raw_address, &round_number.to_be_bytes()), |game| -> Result<_, ContractError> {
+            let mut update_game = game.unwrap();
+            update_game.resolved = true;
+            Ok(update_game)
+        })?;
+    }
 
     Ok(Response::default())
 }
@@ -335,6 +355,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::State {} => to_binary(&query_state(deps)?),
         QueryMsg::Game { address, round } => to_binary(&query_game(deps, address, round)?),
         QueryMsg::Prediction { round } => to_binary(&query_prediction(deps, round)?),
+        QueryMsg::Predictions {start_after, limit}  => to_binary(&query_predictions(deps, start_after, limit)?)
     }
 }
 
@@ -359,14 +380,20 @@ fn query_prediction(deps: Deps, round: u64) -> StdResult<()> {
     let state = STATE.load(deps.storage)?;
     Ok(())
 }
+fn query_predictions(deps: Deps, start_after: Option<u64>, limit: Option<u64>) -> StdResult<()> {
+    let state = STATE.load(deps.storage)?;
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::mock_querier::mock_dependencies_custom;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::{attr, coins, from_binary, Api, Attribute, Coin};
     use std::ops::Add;
+    use std::str::FromStr;
 
     #[test]
     fn proper_initialization() {
@@ -380,6 +407,7 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
+            collector_ratio: Decimal::from_str("0.05").unwrap()
         };
         let info = mock_info("creator", &coins(1000, "earth"));
 
@@ -427,6 +455,7 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
+            collector_ratio: Decimal::from_str("0.05").unwrap()
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -566,6 +595,7 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
+            collector_ratio: Decimal::from_str("0.05").unwrap()
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -622,6 +652,7 @@ mod tests {
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(config.round_time);
         let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
+        assert_eq!(res.attributes, vec![Attribute::new("action", "resolve_prediction")]);
         // assert_eq!(
         //     res.attributes,
         //     vec![
@@ -658,62 +689,81 @@ mod tests {
         // Resolve
         env.block.time = env.block.time.plus_seconds(config.round_time);
         let msg = ExecuteMsg::ResolvePrediction {};
-        let res = execute(deps.as_mut(), env, mock_info("bot", &[]), msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
         assert_eq!(
             res.attributes,
             vec![
-                Attribute::new("action", "resolve_prediction"),
+                Attribute::new("prediction_id", "0"),
                 Attribute::new("locked_price", "35714285"),
-                Attribute::new("is_success", "false"),
-                Attribute::new("prediction_id", "1")
+                Attribute::new("is_success", "true"),
+                Attribute::new("resolved", "up"),
+                Attribute::new("action", "resolve_prediction")
             ]
+        );
+
+        deps.querier.pool_token(
+            Uint128::new(56_250_000_000u128),
+            Uint128::new(255_000_000u128),
+        );
+        // Player1 enter down
+        let msg = ExecuteMsg::MakePrediction { up: false };
+        let info = mock_info(
+            "player1",
+            &[Coin {
+                denom: "uusd".to_string(),
+                amount: Uint128::from(100_000_000u128),
+            }],
+        );
+        let res = execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+        let info = mock_info(
+            "player2",
+            &[Coin {
+                denom: "uusd".to_string(),
+                amount: Uint128::from(500_000_000u128),
+            }],
+        );
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        println!("{:?}", res);
+
+        // Resolve
+        env.block.time = env.block.time.plus_seconds(config.round_time);
+        let msg = ExecuteMsg::ResolvePrediction {};
+        let res = execute(deps.as_mut(), env, mock_info("bot", &[]), msg).unwrap();
+        println!("{:?}", res);
+        assert_eq!(
+            res.attributes,
+            vec![
+                Attribute::new("prediction_id", "1"),
+                Attribute::new("locked_price", "220588235"),
+                Attribute::new("is_success", "false"),
+                Attribute::new("action", "resolve_prediction")
+            ]
+        );
+
+    }
+
+    #[test]
+    fn proper_resolve_game() {
+        let mut deps = mock_dependencies_custom(&[]);
+        deps.querier.pool_token(
+            Uint128::new(10_250_000_000u128),
+            Uint128::new(955_000_000u128),
+        );
+
+        let msg = InstantiateMsg {
+            pool_address: "terraswap".to_string(),
+            round_time: 300,
+            limit_time: 30,
+            denom: "uusd".to_string(),
+            collector_ratio: Decimal::from_str("0.05").unwrap()
+        };
+        let info = mock_info("creator", &[]);
+        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        deps.querier.pool_token(
+            Uint128::new(15_250_000_000u128),
+            Uint128::new(555_000_000u128),
         );
     }
 
-    // #[test]
-    // fn increment() {
-    //     let mut deps = mock_dependencies(&coins(2, "token"));
-    //
-    //     let msg = InstantiateMsg { pool_address: "".to_string(), round_time: 0, limit_time: 0, denom: "".to_string() };
-    //     let info = mock_info("creator", &coins(2, "token"));
-    //     let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-    //
-    //     // beneficiary can release it
-    //     let info = mock_info("anyone", &coins(2, "token"));
-    //     let msg = ExecuteMsg::Increment {};
-    //     let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-    //
-    //     // should increase counter by 1
-    //     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-    //     let value: CountResponse = from_binary(&res).unwrap();
-    //     assert_eq!(18, value.count);
-    // }
-    //
-    // #[test]
-    // fn reset() {
-    //     let mut deps = mock_dependencies(&coins(2, "token"));
-    //
-    //     let msg = InstantiateMsg { count: 17 };
-    //     let info = mock_info("creator", &coins(2, "token"));
-    //     let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-    //
-    //     // beneficiary can release it
-    //     let unauth_info = mock_info("anyone", &coins(2, "token"));
-    //     let msg = ExecuteMsg::Reset { count: 5 };
-    //     let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
-    //     match res {
-    //         Err(ContractError::Unauthorized {}) => {}
-    //         _ => panic!("Must return unauthorized error"),
-    //     }
-    //
-    //     // only the original creator can reset the counter
-    //     let auth_info = mock_info("creator", &coins(2, "token"));
-    //     let msg = ExecuteMsg::Reset { count: 5 };
-    //     let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
-    //
-    //     // should now be 5
-    //     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-    //     let value: CountResponse = from_binary(&res).unwrap();
-    //     assert_eq!(5, value.count);
-    // }
 }
