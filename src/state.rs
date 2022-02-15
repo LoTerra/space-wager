@@ -7,6 +7,7 @@ use cw_storage_plus::{Item, Map};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     pub pool_address: CanonicalAddr,
+    pub collector_address: CanonicalAddr,
     pub round_time: u64,
     pub limit_time: u64,
     pub denom: String,
@@ -26,6 +27,7 @@ pub struct Prediction {
     pub up: Uint128,
     pub down: Uint128,
     pub locked_price: Uint128,
+    pub resolved_price: Uint128,
     pub closing_time: u64,
     pub expire_time: u64,
     pub success: bool,

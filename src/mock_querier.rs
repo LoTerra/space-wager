@@ -5,6 +5,7 @@ use cosmwasm_std::{
     SystemError, SystemResult, Uint128, WasmQuery,
 };
 use std::str::FromStr;
+use terra_cosmwasm::{TaxCapResponse, TaxRateResponse, TerraQuery, TerraQueryWrapper};
 use terraswap::asset::Asset;
 use terraswap::asset::AssetInfo::{NativeToken, Token};
 use terraswap::pair::PoolResponse;
@@ -27,7 +28,7 @@ pub fn mock_dependencies_custom(
 }
 
 pub struct WasmMockQuerier {
-    base: MockQuerier<Empty>,
+    base: MockQuerier<TerraQueryWrapper>,
     pool_response: PoolInfoResponse,
 }
 
@@ -48,7 +49,7 @@ impl PoolInfoResponse {
 impl Querier for WasmMockQuerier {
     fn raw_query(&self, bin_request: &[u8]) -> QuerierResult {
         // MockQuerier doesn't support Custom, so we ignore it completely here
-        let request: QueryRequest<Empty> = match from_slice(bin_request) {
+        let request: QueryRequest<TerraQueryWrapper> = match from_slice(bin_request) {
             Ok(v) => v,
             Err(e) => {
                 return SystemResult::Err(SystemError::InvalidRequest {
@@ -62,7 +63,7 @@ impl Querier for WasmMockQuerier {
 }
 
 impl WasmMockQuerier {
-    pub fn handle_query(&self, request: &QueryRequest<Empty>) -> QuerierResult {
+    pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
         match &request {
             QueryRequest::Wasm(WasmQuery::Smart { contract_addr, msg }) => {
                 println!("{}", contract_addr);
@@ -89,14 +90,27 @@ impl WasmMockQuerier {
                 }
                 panic!("DO NOT ENTER HERE")
             }
-
+            QueryRequest::Custom(TerraQueryWrapper { route, query_data }) => match query_data {
+                TerraQuery::TaxRate {} => {
+                    let res = TaxRateResponse {
+                        rate: Decimal::percent(1),
+                    };
+                    SystemResult::Ok(ContractResult::from(to_binary(&res)))
+                }
+                TerraQuery::TaxCap { denom: _ } => {
+                    let cap = Uint128::from(1000000u128);
+                    let res = TaxCapResponse { cap };
+                    SystemResult::Ok(ContractResult::from(to_binary(&res)))
+                }
+                _ => panic!("DO NOT ENTER HERE"),
+            }
             _ => self.base.handle_query(request),
         }
     }
 }
 
 impl WasmMockQuerier {
-    pub fn new(base: MockQuerier<Empty>) -> Self {
+    pub fn new(base: MockQuerier<TerraQueryWrapper>) -> Self {
         WasmMockQuerier {
             base,
             pool_response: PoolInfoResponse::default(),

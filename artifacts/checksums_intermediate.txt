@@ -1,0 +1,1 @@
+2b748d03850f8db1bac43ff6ee8ce35fc662330b2aa0a3bccc4e6dbd3355c38f  ./target/wasm32-unknown-unknown/release/space_wager.wasm

@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Addr, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128, WasmQuery, Decimal};
+use cosmwasm_std::{to_binary, Addr, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128, WasmQuery, Decimal, CosmosMsg, BankMsg, Coin, SubMsg};
 use cw2::set_contract_version;
-use std::ops::{Mul, Sub};
+use std::ops::{Add, Mul, Sub};
 use terraswap::asset::AssetInfo;
 use terraswap::pair::PoolResponse;
 
@@ -10,6 +10,7 @@ use crate::error::ContractError;
 use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, StateResponse};
 
 use crate::state::{Config, Game, Prediction, State, CONFIG, GAMES, PREDICTIONS, STATE};
+use crate::taxation::deduct_tax;
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:space-wager";
@@ -26,6 +27,7 @@ pub fn instantiate(
 
     let config = Config {
         pool_address: deps.api.addr_canonicalize(msg.pool_address.as_str())?,
+        collector_address: deps.api.addr_canonicalize(msg.collector_address.as_str())?,
         round_time: msg.round_time,
         limit_time: msg.limit_time,
         denom: msg.denom,
@@ -43,6 +45,7 @@ pub fn instantiate(
             up: Uint128::zero(),
             down: Uint128::zero(),
             locked_price: Uint128::zero(),
+            resolved_price: Uint128::zero(),
             closing_time: env.block.time.plus_seconds(msg.round_time).seconds(),
             expire_time: env
                 .block
@@ -176,14 +179,23 @@ pub fn try_resolve_game(
     let state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
     let raw_address = deps.api.addr_canonicalize(&address)?;
-    let mut amount = Uint128::zero();
+    let mut prize_amount = Uint128::zero();
+    let mut refund_amount = Uint128::zero();
     //let fee = Uint128::from(1).checked_sub(config.collector_fee);
+    let fee = Decimal::one().sub(config.collector_fee);
 
     for round_number in round {
         let prediction = PREDICTIONS.load(deps.storage, &round_number.to_be_bytes())?;
-        let game = GAMES.load(deps.storage, (&raw_address, &round_number.to_be_bytes()))?;
-        let mut round_prize = Uint128::zero();
+        if prediction.expire_time > env.block.time.seconds() {
+            return Err(ContractError::PredictionStillInProgress {});
+        }
 
+        let game = GAMES.load(deps.storage, (&raw_address, &round_number.to_be_bytes()))?;
+        if game.resolved {
+            return Err(ContractError::AlreadyResolved{})
+        }
+
+        let mut round_prize = Uint128::zero();
         if prediction.success {
             if let Some(is_up) = prediction.is_up {
                 if is_up {
@@ -191,14 +203,14 @@ pub fn try_resolve_game(
                         let up_ratio = Decimal::from_ratio(prediction.up.checked_add(prediction.down).unwrap(), prediction.up);
                         let payout = game.up.mul(up_ratio);
                         round_prize = payout;
-                        amount += payout;
+                        prize_amount += payout;
                     }
                 }else{
                     if !game.down.is_zero() {
                         let down_ratio = Decimal::from_ratio(prediction.up.checked_add(prediction.down).unwrap(), prediction.down);
                         let payout = game.down.mul(down_ratio);
                         round_prize = payout;
-                        amount += payout;
+                        prize_amount += payout;
                     }
                 }
             }
@@ -206,19 +218,57 @@ pub fn try_resolve_game(
         }else {
             round_prize = game.down.checked_add(game.up).unwrap();
             // Refund
-            amount += game.down.checked_add(game.up).unwrap();
-
+            refund_amount += game.down.checked_add(game.up).unwrap();
         }
 
         // Update game as resolved
         GAMES.update(deps.storage, (&raw_address, &round_number.to_be_bytes()), |game| -> Result<_, ContractError> {
             let mut update_game = game.unwrap();
             update_game.resolved = true;
+            update_game.prize = round_prize;
             Ok(update_game)
         })?;
     }
 
-    Ok(Response::default())
+    let mut collector_fee = Uint128::zero();
+    let net_prize_amount = if !prize_amount.is_zero() {
+        let net_amount = prize_amount.mul(fee);
+        collector_fee = prize_amount.wrapping_sub(net_amount);
+        net_amount
+    }else {
+        prize_amount
+    };
+    let final_prize_amount = net_prize_amount.add(refund_amount);
+
+    let exec_msg_prize = CosmosMsg::Bank(BankMsg::Send {
+        to_address: address.clone(),
+        amount: vec![deduct_tax(
+            &deps.querier,
+            Coin {
+                denom: config.denom.clone(),
+                amount: final_prize_amount,
+            },
+        )?],
+    });
+
+    let mut res = Response::new().add_message(exec_msg_prize);
+
+    if !collector_fee.is_zero(){
+        let exec_msg_collector_fee = CosmosMsg::Bank(BankMsg::Send {
+            to_address: deps.api.addr_humanize(&config.collector_address)?.to_string(),
+            amount: vec![deduct_tax(
+                &deps.querier,
+                Coin {
+                    denom: config.denom,
+                    amount: collector_fee,
+                },
+            )?],
+        });
+
+        res.messages.push(SubMsg::new(exec_msg_collector_fee));
+    }
+
+    Ok(res)
 }
 
 pub fn try_resolve_prediction(
@@ -272,7 +322,8 @@ pub fn try_resolve_prediction(
         // Check if not expired and prediction up and down are not zero
         let is_success = env.block.time.seconds() < prediction.expire_time
             && !prediction.up.is_zero()
-            && !prediction.down.is_zero();
+            && !prediction.down.is_zero() && prediction.locked_price != predicted_price;
+
         let is_up = predicted_price > prediction.locked_price;
         // Update the current prediction
         PREDICTIONS.update(
@@ -282,6 +333,7 @@ pub fn try_resolve_prediction(
                 let mut update_prediction = prediction.unwrap();
                 if is_success {
                     update_prediction.is_up = Some(is_up);
+                    update_prediction.resolved_price = predicted_price;
                 }
                 update_prediction.success = is_success;
                 Ok(update_prediction)
@@ -296,20 +348,24 @@ pub fn try_resolve_prediction(
             "prediction_id",
             (state.round - 1).to_string(),
         ));
+
         res.attributes
-            .push(Attribute::new("locked_price", predicted_price.to_string()));
+            .push(Attribute::new("locked_price", prediction.locked_price.to_string()));
         res.attributes
             .push(Attribute::new("is_success", is_success.to_string()));
 
         if is_success {
             res.attributes
                 .push(Attribute::new("resolved", direction.to_string()));
+            res.attributes
+                .push(Attribute::new("resolved_price", predicted_price.to_string()));
         }
     }
     res.attributes
         .push(Attribute::new("action", "resolve_prediction"));
 
     // Update locked price of the current prediction
+    println!("{} Predicted", predicted_price);
     PREDICTIONS.update(
         deps.storage,
         &state.round.to_be_bytes(),
@@ -332,6 +388,7 @@ pub fn try_resolve_prediction(
             up: Uint128::zero(),
             down: Uint128::zero(),
             locked_price: Uint128::zero(),
+            resolved_price: Uint128::zero(),
             closing_time: env.block.time.plus_seconds(config.round_time).seconds(),
             expire_time: env
                 .block
@@ -404,6 +461,7 @@ mod tests {
         );
         let msg = InstantiateMsg {
             pool_address: "terraswap".to_string(),
+            collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
@@ -452,6 +510,7 @@ mod tests {
         );
         let msg = InstantiateMsg {
             pool_address: "terraswap".to_string(),
+            collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
@@ -592,6 +651,7 @@ mod tests {
 
         let msg = InstantiateMsg {
             pool_address: "terraswap".to_string(),
+            collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
@@ -694,9 +754,10 @@ mod tests {
             res.attributes,
             vec![
                 Attribute::new("prediction_id", "0"),
-                Attribute::new("locked_price", "35714285"),
+                Attribute::new("locked_price", "27477477"),
                 Attribute::new("is_success", "true"),
                 Attribute::new("resolved", "up"),
+                Attribute::new("resolved_price", "35714285"),
                 Attribute::new("action", "resolve_prediction")
             ]
         );
@@ -734,7 +795,7 @@ mod tests {
             res.attributes,
             vec![
                 Attribute::new("prediction_id", "1"),
-                Attribute::new("locked_price", "220588235"),
+                Attribute::new("locked_price", "35714285"),
                 Attribute::new("is_success", "false"),
                 Attribute::new("action", "resolve_prediction")
             ]
@@ -752,6 +813,7 @@ mod tests {
 
         let msg = InstantiateMsg {
             pool_address: "terraswap".to_string(),
+            collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
@@ -764,6 +826,64 @@ mod tests {
             Uint128::new(15_250_000_000u128),
             Uint128::new(555_000_000u128),
         );
+
+        // Player1 enter down
+        let msg = ExecuteMsg::MakePrediction { up: false };
+        let info = mock_info(
+            "player1",
+            &[Coin {
+                denom: "uusd".to_string(),
+                amount: Uint128::from(100_000_000u128),
+            }],
+        );
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // Player2 Enter up
+        let msg = ExecuteMsg::MakePrediction { up: true };
+        let info = mock_info(
+            "player2",
+            &[Coin {
+                denom: "uusd".to_string(),
+                amount: Uint128::from(500_000_000u128),
+            }],
+        );
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // Player2 Enter down
+        let msg = ExecuteMsg::MakePrediction { up: false };
+        let info = mock_info(
+            "player2",
+            &[Coin {
+                denom: "uusd".to_string(),
+                amount: Uint128::from(100_000_000u128),
+            }],
+        );
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        let msg = ExecuteMsg::ResolvePrediction {};
+        let config = CONFIG.load(deps.as_ref().storage).unwrap();
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(config.round_time);
+        let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
+        assert_eq!(res.attributes, vec![Attribute::new("action", "resolve_prediction")]);
+
+        let msg = ExecuteMsg::ResolveGame { address: "player1".to_string(), round: vec![0] };
+        let err = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap_err();
+        assert_eq!(err,ContractError::PredictionStillInProgress {});
+
+        // Resolve
+        deps.querier.pool_token(
+            Uint128::new(1_250_000_000u128),
+            Uint128::new(955_000_000u128),
+        );
+        let msg = ExecuteMsg::ResolvePrediction {};
+        env.block.time = env.block.time.plus_seconds(config.round_time);
+        let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
+        println!("{:?}", res);
+        env.block.time = env.block.time.plus_seconds(config.round_time).plus_seconds(config.limit_time);
+        let msg = ExecuteMsg::ResolveGame { address: "player1".to_string(), round: vec![0] };
+        let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
+        println!("{:?}", res);
     }
 
 }
