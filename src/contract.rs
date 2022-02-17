@@ -253,18 +253,20 @@ pub fn try_resolve_game(
     };
     let final_amount = net_prize_amount.add(refund_amount);
 
-    let exec_msg_prize = CosmosMsg::Bank(BankMsg::Send {
-        to_address: address.clone(),
-        amount: vec![deduct_tax(
-            &deps.querier,
-            Coin {
-                denom: config.denom.clone(),
-                amount: final_amount,
-            },
-        )?],
-    });
-
-    let mut res = Response::new().add_message(exec_msg_prize);
+    let mut res = Response::new();
+    if !final_amount.is_zero() {
+        let exec_msg_prize = CosmosMsg::Bank(BankMsg::Send {
+            to_address: address.clone(),
+            amount: vec![deduct_tax(
+                &deps.querier,
+                Coin {
+                    denom: config.denom.clone(),
+                    amount: final_amount,
+                },
+            )?],
+        });
+        res.messages.push(SubMsg::new(exec_msg_prize));
+    }
 
     if !collector_fee.is_zero() {
         let exec_msg_collector_fee = CosmosMsg::Bank(BankMsg::Send {
@@ -495,7 +497,7 @@ mod tests {
     use super::*;
     use crate::mock_querier::mock_dependencies_custom;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{attr, coins, from_binary, Api, Attribute, Coin};
+    use cosmwasm_std::{attr, coins, from_binary, Addr, Api, Attribute, Coin};
     use std::ops::Add;
     use std::str::FromStr;
 
