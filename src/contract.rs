@@ -1,7 +1,12 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Addr, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128, WasmQuery, Decimal, CosmosMsg, BankMsg, Coin, SubMsg};
+use cosmwasm_std::{
+    to_binary, Attribute, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env,
+    MessageInfo, Order, Response, StdResult, SubMsg, Uint128, WasmQuery,
+};
 use cw2::set_contract_version;
+use cw_storage_plus::Bound;
+use std::convert::TryInto;
 use std::ops::{Add, Mul, Sub};
 use terraswap::asset::AssetInfo;
 use terraswap::pair::PoolResponse;
@@ -31,7 +36,7 @@ pub fn instantiate(
         round_time: msg.round_time,
         limit_time: msg.limit_time,
         denom: msg.denom,
-        collector_fee: msg.collector_ratio
+        collector_fee: msg.collector_ratio,
     };
 
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -172,11 +177,10 @@ pub fn try_make_prediction(
 pub fn try_resolve_game(
     deps: DepsMut,
     env: Env,
-    info: MessageInfo,
+    _info: MessageInfo,
     address: String,
     round: Vec<u64>,
 ) -> Result<Response, ContractError> {
-    let state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
     let raw_address = deps.api.addr_canonicalize(&address)?;
     let mut prize_amount = Uint128::zero();
@@ -192,7 +196,7 @@ pub fn try_resolve_game(
 
         let game = GAMES.load(deps.storage, (&raw_address, &round_number.to_be_bytes()))?;
         if game.resolved {
-            return Err(ContractError::AlreadyResolved{})
+            return Err(ContractError::AlreadyResolved {});
         }
 
         let mut round_prize = Uint128::zero();
@@ -200,34 +204,43 @@ pub fn try_resolve_game(
             if let Some(is_up) = prediction.is_up {
                 if is_up {
                     if !game.up.is_zero() {
-                        let up_ratio = Decimal::from_ratio(prediction.up.checked_add(prediction.down).unwrap(), prediction.up);
+                        let up_ratio = Decimal::from_ratio(
+                            prediction.up.checked_add(prediction.down).unwrap(),
+                            prediction.up,
+                        );
                         let payout = game.up.mul(up_ratio);
                         round_prize = payout;
                         prize_amount += payout;
                     }
-                }else{
+                } else {
                     if !game.down.is_zero() {
-                        let down_ratio = Decimal::from_ratio(prediction.up.checked_add(prediction.down).unwrap(), prediction.down);
+                        let down_ratio = Decimal::from_ratio(
+                            prediction.up.checked_add(prediction.down).unwrap(),
+                            prediction.down,
+                        );
                         let payout = game.down.mul(down_ratio);
                         round_prize = payout;
                         prize_amount += payout;
                     }
                 }
             }
-
-        }else {
+        } else {
             round_prize = game.down.checked_add(game.up).unwrap();
             // Refund
             refund_amount += game.down.checked_add(game.up).unwrap();
         }
 
         // Update game as resolved
-        GAMES.update(deps.storage, (&raw_address, &round_number.to_be_bytes()), |game| -> Result<_, ContractError> {
-            let mut update_game = game.unwrap();
-            update_game.resolved = true;
-            update_game.prize = round_prize;
-            Ok(update_game)
-        })?;
+        GAMES.update(
+            deps.storage,
+            (&raw_address, &round_number.to_be_bytes()),
+            |game| -> Result<_, ContractError> {
+                let mut update_game = game.unwrap();
+                update_game.resolved = true;
+                update_game.prize = round_prize;
+                Ok(update_game)
+            },
+        )?;
     }
 
     let mut collector_fee = Uint128::zero();
@@ -235,10 +248,10 @@ pub fn try_resolve_game(
         let net_amount = prize_amount.mul(fee);
         collector_fee = prize_amount.wrapping_sub(net_amount);
         net_amount
-    }else {
+    } else {
         prize_amount
     };
-    let final_prize_amount = net_prize_amount.add(refund_amount);
+    let final_amount = net_prize_amount.add(refund_amount);
 
     let exec_msg_prize = CosmosMsg::Bank(BankMsg::Send {
         to_address: address.clone(),
@@ -246,16 +259,19 @@ pub fn try_resolve_game(
             &deps.querier,
             Coin {
                 denom: config.denom.clone(),
-                amount: final_prize_amount,
+                amount: final_amount,
             },
         )?],
     });
 
     let mut res = Response::new().add_message(exec_msg_prize);
 
-    if !collector_fee.is_zero(){
+    if !collector_fee.is_zero() {
         let exec_msg_collector_fee = CosmosMsg::Bank(BankMsg::Send {
-            to_address: deps.api.addr_humanize(&config.collector_address)?.to_string(),
+            to_address: deps
+                .api
+                .addr_humanize(&config.collector_address)?
+                .to_string(),
             amount: vec![deduct_tax(
                 &deps.querier,
                 Coin {
@@ -268,6 +284,9 @@ pub fn try_resolve_game(
         res.messages.push(SubMsg::new(exec_msg_collector_fee));
     }
 
+    res.attributes
+        .push(Attribute::new("action", "resolve_game"));
+    res.attributes.push(Attribute::new("recipient", address));
     Ok(res)
 }
 
@@ -322,7 +341,8 @@ pub fn try_resolve_prediction(
         // Check if not expired and prediction up and down are not zero
         let is_success = env.block.time.seconds() < prediction.expire_time
             && !prediction.up.is_zero()
-            && !prediction.down.is_zero() && prediction.locked_price != predicted_price;
+            && !prediction.down.is_zero()
+            && prediction.locked_price != predicted_price;
 
         let is_up = predicted_price > prediction.locked_price;
         // Update the current prediction
@@ -349,23 +369,26 @@ pub fn try_resolve_prediction(
             (state.round - 1).to_string(),
         ));
 
-        res.attributes
-            .push(Attribute::new("locked_price", prediction.locked_price.to_string()));
+        res.attributes.push(Attribute::new(
+            "locked_price",
+            prediction.locked_price.to_string(),
+        ));
         res.attributes
             .push(Attribute::new("is_success", is_success.to_string()));
 
         if is_success {
             res.attributes
                 .push(Attribute::new("resolved", direction.to_string()));
-            res.attributes
-                .push(Attribute::new("resolved_price", predicted_price.to_string()));
+            res.attributes.push(Attribute::new(
+                "resolved_price",
+                predicted_price.to_string(),
+            ));
         }
     }
     res.attributes
         .push(Attribute::new("action", "resolve_prediction"));
 
     // Update locked price of the current prediction
-    println!("{} Predicted", predicted_price);
     PREDICTIONS.update(
         deps.storage,
         &state.round.to_be_bytes(),
@@ -412,7 +435,9 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::State {} => to_binary(&query_state(deps)?),
         QueryMsg::Game { address, round } => to_binary(&query_game(deps, address, round)?),
         QueryMsg::Prediction { round } => to_binary(&query_prediction(deps, round)?),
-        QueryMsg::Predictions {start_after, limit}  => to_binary(&query_predictions(deps, start_after, limit)?)
+        QueryMsg::Predictions { start_after, limit } => {
+            to_binary(&query_predictions(deps, start_after, limit)?)
+        }
     }
 }
 
@@ -429,17 +454,39 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         denom: config.denom,
     })
 }
-fn query_game(deps: Deps, address: String, round: u64) -> StdResult<()> {
-    let state = STATE.load(deps.storage)?;
-    Ok(())
+fn query_game(deps: Deps, address: String, round: u64) -> StdResult<Game> {
+    let raw_address = deps.api.addr_canonicalize(&address)?;
+    let game = GAMES.load(
+        deps.storage,
+        (&raw_address.as_slice(), &round.to_be_bytes()),
+    )?;
+    Ok(game)
 }
-fn query_prediction(deps: Deps, round: u64) -> StdResult<()> {
-    let state = STATE.load(deps.storage)?;
-    Ok(())
+fn query_prediction(deps: Deps, round: u64) -> StdResult<Prediction> {
+    let prediction = PREDICTIONS.load(deps.storage, &round.to_be_bytes())?;
+    Ok(prediction)
 }
-fn query_predictions(deps: Deps, start_after: Option<u64>, limit: Option<u64>) -> StdResult<()> {
-    let state = STATE.load(deps.storage)?;
-    Ok(())
+
+const DEFAULT_LIMIT: u32 = 10;
+const MAX_LIMIT: u32 = 30;
+fn query_predictions(
+    deps: Deps,
+    start_after: Option<u64>,
+    limit: Option<u32>,
+) -> StdResult<Vec<(u64, Prediction)>> {
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+    let start = start_after.map(|d| Bound::Exclusive(d.to_be_bytes().to_vec()));
+
+    let prediction = PREDICTIONS
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|pair| {
+            pair.and_then(|(k, prediction)| {
+                Ok((u64::from_be_bytes(k.try_into().unwrap()), prediction))
+            })
+        })
+        .collect::<StdResult<Vec<(u64, Prediction)>>>()?;
+    Ok(prediction)
 }
 
 #[cfg(test)]
@@ -465,7 +512,7 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
-            collector_ratio: Decimal::from_str("0.05").unwrap()
+            collector_ratio: Decimal::from_str("0.05").unwrap(),
         };
         let info = mock_info("creator", &coins(1000, "earth"));
 
@@ -514,7 +561,7 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
-            collector_ratio: Decimal::from_str("0.05").unwrap()
+            collector_ratio: Decimal::from_str("0.05").unwrap(),
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -655,7 +702,7 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
-            collector_ratio: Decimal::from_str("0.05").unwrap()
+            collector_ratio: Decimal::from_str("0.05").unwrap(),
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -712,7 +759,10 @@ mod tests {
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(config.round_time);
         let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
-        assert_eq!(res.attributes, vec![Attribute::new("action", "resolve_prediction")]);
+        assert_eq!(
+            res.attributes,
+            vec![Attribute::new("action", "resolve_prediction")]
+        );
         // assert_eq!(
         //     res.attributes,
         //     vec![
@@ -800,7 +850,6 @@ mod tests {
                 Attribute::new("action", "resolve_prediction")
             ]
         );
-
     }
 
     #[test]
@@ -817,7 +866,7 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
-            collector_ratio: Decimal::from_str("0.05").unwrap()
+            collector_ratio: Decimal::from_str("0.05").unwrap(),
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -865,13 +914,19 @@ mod tests {
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(config.round_time);
         let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
-        assert_eq!(res.attributes, vec![Attribute::new("action", "resolve_prediction")]);
+        assert_eq!(
+            res.attributes,
+            vec![Attribute::new("action", "resolve_prediction")]
+        );
 
-        let msg = ExecuteMsg::ResolveGame { address: "player1".to_string(), round: vec![0] };
+        let msg = ExecuteMsg::ResolveGame {
+            address: "player1".to_string(),
+            round: vec![0],
+        };
         let err = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap_err();
-        assert_eq!(err,ContractError::PredictionStillInProgress {});
+        assert_eq!(err, ContractError::PredictionStillInProgress {});
 
-        // Resolve
+        // Resolve success
         deps.querier.pool_token(
             Uint128::new(1_250_000_000u128),
             Uint128::new(955_000_000u128),
@@ -879,11 +934,119 @@ mod tests {
         let msg = ExecuteMsg::ResolvePrediction {};
         env.block.time = env.block.time.plus_seconds(config.round_time);
         let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
-        println!("{:?}", res);
-        env.block.time = env.block.time.plus_seconds(config.round_time).plus_seconds(config.limit_time);
-        let msg = ExecuteMsg::ResolveGame { address: "player1".to_string(), round: vec![0] };
-        let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
-        println!("{:?}", res);
-    }
+        env.block.time = env
+            .block
+            .time
+            .plus_seconds(config.round_time)
+            .plus_seconds(config.limit_time);
 
+        let msg = ExecuteMsg::ResolveGame {
+            address: "player1".to_string(),
+            round: vec![0],
+        };
+        let res = execute(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("bot", &[]),
+            msg.clone(),
+        )
+        .unwrap();
+
+        let msg_bank = BankMsg::Send {
+            to_address: "player1".to_string(),
+            amount: vec![Coin::new(331_500_000, "uusd")],
+        };
+        let msg_bank_fee = BankMsg::Send {
+            to_address: "collector".to_string(),
+            amount: vec![Coin::new(17_326_732, "uusd")],
+        };
+
+        assert_eq!(
+            res.messages,
+            vec![
+                SubMsg::new(CosmosMsg::Bank(msg_bank)),
+                SubMsg::new(CosmosMsg::Bank(msg_bank_fee))
+            ]
+        );
+        assert_eq!(
+            res.attributes,
+            vec![
+                Attribute::new("action", "resolve_game"),
+                Attribute::new("recipient", "player1")
+            ]
+        );
+
+        // Handle resolve multiple times
+        let err = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap_err();
+        assert_eq!(err, ContractError::AlreadyResolved {});
+
+        /*
+           New Prediction with failed and refund player 1
+        */
+        let state = STATE.load(deps.as_ref().storage).unwrap();
+        println!("{:?}", state);
+
+        deps.querier.pool_token(
+            Uint128::new(15_250_000_000u128),
+            Uint128::new(555_000_000u128),
+        );
+
+        // Player1 enter down
+        let msg = ExecuteMsg::MakePrediction { up: false };
+        let info = mock_info(
+            "player1",
+            &[Coin {
+                denom: "uusd".to_string(),
+                amount: Uint128::from(100_000_000u128),
+            }],
+        );
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        let msg = ExecuteMsg::ResolvePrediction {};
+        //env.block.time = env.block.time.plus_seconds(config.round_time);
+        let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
+        assert_eq!(res.messages.len(), 0);
+        assert_eq!(
+            res.attributes,
+            vec![
+                Attribute::new("prediction_id", "1"),
+                Attribute::new("locked_price", "1308900"),
+                Attribute::new("is_success", "false"),
+                Attribute::new("action", "resolve_prediction")
+            ]
+        );
+
+        let msg = ExecuteMsg::ResolveGame {
+            address: "player1".to_string(),
+            round: vec![2],
+        };
+        let err = execute(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("bot", &[]),
+            msg.clone(),
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::PredictionStillInProgress {});
+        env.block.time = env.block.time.plus_seconds(config.round_time);
+        let res = execute(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("bot", &[]),
+            msg.clone(),
+        )
+        .unwrap();
+        let bank_msg = BankMsg::Send {
+            to_address: "player1".to_string(),
+            amount: vec![Coin::new(99_009_900, "uusd")],
+        };
+        assert_eq!(res.messages, vec![SubMsg::new(CosmosMsg::Bank(bank_msg))]);
+        assert_eq!(
+            res.attributes,
+            vec![
+                Attribute::new("action", "resolve_game"),
+                Attribute::new("recipient", "player1")
+            ]
+        );
+    }
 }

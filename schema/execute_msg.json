@@ -3,34 +3,65 @@
   "title": "ExecuteMsg",
   "anyOf": [
     {
+      "description": "Make a prediction on the current round",
       "type": "object",
       "required": [
-        "increment"
+        "make_prediction"
       ],
       "properties": {
-        "increment": {
-          "type": "object"
+        "make_prediction": {
+          "type": "object",
+          "required": [
+            "up"
+          ],
+          "properties": {
+            "up": {
+              "type": "boolean"
+            }
+          }
         }
       },
       "additionalProperties": false
     },
     {
+      "description": "Resolve will collect prize or refund if prediction fail",
       "type": "object",
       "required": [
-        "reset"
+        "resolve_game"
       ],
       "properties": {
-        "reset": {
+        "resolve_game": {
           "type": "object",
           "required": [
-            "count"
+            "address",
+            "round"
           ],
           "properties": {
-            "count": {
-              "type": "integer",
-              "format": "int32"
+            "address": {
+              "type": "string"
+            },
+            "round": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
             }
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Finish round will start a new round",
+      "type": "object",
+      "required": [
+        "resolve_prediction"
+      ],
+      "properties": {
+        "resolve_prediction": {
+          "type": "object"
         }
       },
       "additionalProperties": false

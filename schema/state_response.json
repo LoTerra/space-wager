@@ -1,14 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "CountResponse",
+  "title": "StateResponse",
   "type": "object",
   "required": [
-    "count"
+    "round"
   ],
   "properties": {
-    "count": {
+    "round": {
       "type": "integer",
-      "format": "int32"
+      "format": "uint64",
+      "minimum": 0.0
     }
   }
 }

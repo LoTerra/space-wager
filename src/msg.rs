@@ -9,7 +9,7 @@ pub struct InstantiateMsg {
     pub round_time: u64,
     pub limit_time: u64,
     pub denom: String,
-    pub collector_ratio: Decimal
+    pub collector_ratio: Decimal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -35,7 +35,10 @@ pub enum QueryMsg {
     /// Retrieve a prediction for info
     Prediction { round: u64 },
     /// Retrieve all predictions for info
-    Predictions { start_after: Option<u64>, limit: Option<u64>},
+    Predictions {
+        start_after: Option<u64>,
+        limit: Option<u32>,
+    },
     // /// Retrieve all games
     // Games { start_after: Option<u64>, limit: Option<u64> },
 }

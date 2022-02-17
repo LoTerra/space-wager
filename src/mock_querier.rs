@@ -103,7 +103,7 @@ impl WasmMockQuerier {
                     SystemResult::Ok(ContractResult::from(to_binary(&res)))
                 }
                 _ => panic!("DO NOT ENTER HERE"),
-            }
+            },
             _ => self.base.handle_query(request),
         }
     }

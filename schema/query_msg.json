@@ -3,13 +3,108 @@
   "title": "QueryMsg",
   "anyOf": [
     {
+      "description": "Retrieve the state",
       "type": "object",
       "required": [
-        "get_count"
+        "state"
       ],
       "properties": {
-        "get_count": {
+        "state": {
           "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Retrieve the config",
+      "type": "object",
+      "required": [
+        "config"
+      ],
+      "properties": {
+        "config": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Retrieve game of an address and round",
+      "type": "object",
+      "required": [
+        "game"
+      ],
+      "properties": {
+        "game": {
+          "type": "object",
+          "required": [
+            "address",
+            "round"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "round": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Retrieve a prediction for info",
+      "type": "object",
+      "required": [
+        "prediction"
+      ],
+      "properties": {
+        "prediction": {
+          "type": "object",
+          "required": [
+            "round"
+          ],
+          "properties": {
+            "round": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Retrieve all predictions for info",
+      "type": "object",
+      "required": [
+        "predictions"
+      ],
+      "properties": {
+        "predictions": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
       },
       "additionalProperties": false
