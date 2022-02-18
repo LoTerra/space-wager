@@ -12,7 +12,7 @@ use terraswap::asset::AssetInfo;
 use terraswap::pair::PoolResponse;
 
 use crate::error::ContractError;
-use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, StateResponse};
+use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, OracleListPriceFeedResponse, OraclePriceFeedQueryMsg, OraclePriceFeedResponse, OraclePriceFeedStateResponse, QueryMsg, StateResponse};
 
 use crate::state::{Config, Game, Prediction, State, CONFIG, GAMES, PREDICTIONS, STATE};
 use crate::taxation::deduct_tax;
@@ -61,6 +61,7 @@ pub fn instantiate(
                 .seconds(),
             success: false,
             is_up: None,
+            oracle_price_worker: None
         },
     )?;
 
@@ -292,6 +293,7 @@ pub fn try_resolve_game(
     Ok(res)
 }
 
+const MAX_LIMIT_QUERY: u32 = 10;
 pub fn try_resolve_prediction(
     deps: DepsMut,
     env: Env,
@@ -305,38 +307,51 @@ pub fn try_resolve_prediction(
     if prediction_now.closing_time > env.block.time.seconds() {
         return Err(ContractError::PredictionStillInProgress {});
     }
+    let query_state_price_feed = OraclePriceFeedQueryMsg::State {};
+    let query_wasm_state = WasmQuery::Smart { contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(), msg: to_binary(&query_state_price_feed)?};
+    let state_info: OraclePriceFeedStateResponse =  deps.querier.query(&query_wasm_state.into())?;
 
-    //Query the pool LUNA-UST Terraswap Calculate the current price pool
-    let pool_info_msg = terraswap::pair::QueryMsg::Pool {};
-    let query = WasmQuery::Smart {
-        contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(),
-        msg: to_binary(&pool_info_msg)?,
-    };
-    let pool_info: PoolResponse = deps.querier.query(&query.into())?;
+    let query_list_price_feed = OraclePriceFeedQueryMsg::GetListPriceFeed { start_after: Some(state_info.round), limit: Some(MAX_LIMIT_QUERY) };
+    let query_wasm_list_price_feed = WasmQuery::Smart { contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(), msg: to_binary(&query_list_price_feed)?};
+    let list_price_feed_info: OracleListPriceFeedResponse = deps.querier.query(&query_wasm_list_price_feed.into())?;
 
-    let luna_asset = pool_info
-        .assets
-        .iter()
-        .find(|&a| match a.info.clone() {
-            AssetInfo::Token { .. } => false,
-            AssetInfo::NativeToken { denom } => denom == "uluna",
-        })
-        .unwrap();
+    let data_price_feed = list_price_feed_info.list.iter().filter(
+        |&price_feed| price_feed.timestamp > env.block.time.seconds()
+    ).collect::<Vec<OraclePriceFeedResponse>>();
+    let data_price_feed_average = data_price_feed[5].clone();
 
-    let ust_asset = pool_info
-        .assets
-        .iter()
-        .find(|&a| match a.info.clone() {
-            AssetInfo::Token { .. } => false,
-            AssetInfo::NativeToken { denom } => denom == "uusd",
-        })
-        .unwrap();
+    // //Query the pool LUNA-UST Terraswap Calculate the current price pool
+    // let pool_info_msg = terraswap::pair::QueryMsg::Pool {};
+    // let query = WasmQuery::Smart {
+    //     contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(),
+    //     msg: to_binary(&pool_info_msg)?,
+    // };
+    // let pool_info: PoolResponse = deps.querier.query(&query.into())?;
+    //
+    // let luna_asset = pool_info
+    //     .assets
+    //     .iter()
+    //     .find(|&a| match a.info.clone() {
+    //         AssetInfo::Token { .. } => false,
+    //         AssetInfo::NativeToken { denom } => denom == "uluna",
+    //     })
+    //     .unwrap();
+    //
+    // let ust_asset = pool_info
+    //     .assets
+    //     .iter()
+    //     .find(|&a| match a.info.clone() {
+    //         AssetInfo::Token { .. } => false,
+    //         AssetInfo::NativeToken { denom } => denom == "uusd",
+    //     })
+    //     .unwrap();
+    //
+    // let predicted_price =
+    //     Uint128::from(1_000_000_u128).multiply_ratio(ust_asset.amount, luna_asset.amount);
 
-    let predicted_price =
-        Uint128::from(1_000_000_u128).multiply_ratio(ust_asset.amount, luna_asset.amount);
+    let predicted_price = data_price_feed_average.price;
 
     let mut res = Response::new();
-
     // Resolve the past prediction
     if state.round != 0 {
         let prediction = PREDICTIONS.load(deps.storage, &(state.round - 1).to_be_bytes())?;
@@ -397,6 +412,7 @@ pub fn try_resolve_prediction(
         |prediction| -> Result<_, ContractError> {
             let mut update_prediction = prediction.unwrap();
             update_prediction.locked_price = predicted_price;
+            update_prediction.oracle_price_worker = Some(deps.api.addr_canonicalize(data_price_feed_average.worker.as_str())?);
             Ok(update_prediction)
         },
     )?;
@@ -424,6 +440,7 @@ pub fn try_resolve_prediction(
                 .seconds(),
             success: false,
             is_up: None,
+            oracle_price_worker: None
         },
     )?;
 
