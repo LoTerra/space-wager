@@ -1,15 +1,10 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{
-    to_binary, Attribute, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env,
-    MessageInfo, Order, Response, StdResult, SubMsg, Uint128, WasmQuery,
-};
+use cosmwasm_std::{to_binary, Attribute, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo, Order, Response, StdResult, SubMsg, Uint128, WasmQuery, CanonicalAddr};
 use cw2::set_contract_version;
 use cw_storage_plus::Bound;
 use std::convert::TryInto;
 use std::ops::{Add, Mul, Sub};
-use terraswap::asset::AssetInfo;
-use terraswap::pair::PoolResponse;
 
 use crate::error::ContractError;
 use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, OracleListPriceFeedResponse, OraclePriceFeedQueryMsg, OraclePriceFeedResponse, OraclePriceFeedStateResponse, QueryMsg, StateResponse};
@@ -31,7 +26,7 @@ pub fn instantiate(
     let state = State { round: 0 };
 
     let config = Config {
-        pool_address: deps.api.addr_canonicalize(msg.pool_address.as_str())?,
+        oracle_price_feed_address: deps.api.addr_canonicalize(msg.oracle_price_feed_address.as_str())?,
         collector_address: deps.api.addr_canonicalize(msg.collector_address.as_str())?,
         round_time: msg.round_time,
         limit_time: msg.limit_time,
@@ -61,7 +56,7 @@ pub fn instantiate(
                 .seconds(),
             success: false,
             is_up: None,
-            oracle_price_worker: None
+            oracle_price_workers: None
         },
     )?;
 
@@ -293,7 +288,7 @@ pub fn try_resolve_game(
     Ok(res)
 }
 
-const MAX_LIMIT_QUERY: u32 = 10;
+const MAX_LIMIT_QUERY: u32 = 30;
 pub fn try_resolve_prediction(
     deps: DepsMut,
     env: Env,
@@ -308,60 +303,53 @@ pub fn try_resolve_prediction(
         return Err(ContractError::PredictionStillInProgress {});
     }
     let query_state_price_feed = OraclePriceFeedQueryMsg::State {};
-    let query_wasm_state = WasmQuery::Smart { contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(), msg: to_binary(&query_state_price_feed)?};
+    let query_wasm_state = WasmQuery::Smart { contract_addr: deps.api.addr_humanize(&config.oracle_price_feed_address)?.to_string(), msg: to_binary(&query_state_price_feed)?};
     let state_info: OraclePriceFeedStateResponse =  deps.querier.query(&query_wasm_state.into())?;
 
     let query_list_price_feed = OraclePriceFeedQueryMsg::GetListPriceFeed { start_after: Some(state_info.round), limit: Some(MAX_LIMIT_QUERY) };
-    let query_wasm_list_price_feed = WasmQuery::Smart { contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(), msg: to_binary(&query_list_price_feed)?};
+    let query_wasm_list_price_feed = WasmQuery::Smart { contract_addr: deps.api.addr_humanize(&config.oracle_price_feed_address)?.to_string(), msg: to_binary(&query_list_price_feed)?};
     let list_price_feed_info: OracleListPriceFeedResponse = deps.querier.query(&query_wasm_list_price_feed.into())?;
 
     let mut data_price_feed = list_price_feed_info.list.iter().filter(
-        |&price_feed| price_feed.timestamp > env.block.time.seconds()
-    ).collect::<Vec<OraclePriceFeedResponse>>();
+        |price_feed| price_feed.timestamp <= prediction_now.closing_time.checked_sub(config.round_time).unwrap() && price_feed.timestamp >= prediction_now.closing_time.checked_sub(config.round_time).unwrap().checked_sub(config.round_time).unwrap()
+    ).collect::<Vec<&OraclePriceFeedResponse>>();
     data_price_feed.sort_by(|a, b| a.price.cmp(&b.price));
 
-    let data_price_feed_average = data_price_feed[5].clone();
+    println!("{:?}", state.round);
+    println!("{:?}", env.block.time.seconds());
+    println!("{:?}", data_price_feed);
+    println!("{:?}", data_price_feed.len());
+    println!("{:?}", prediction_now.closing_time.checked_sub(config.round_time).unwrap());
+    println!("{:?}", prediction_now.closing_time.checked_sub(config.round_time).unwrap().checked_sub(config.round_time).unwrap());
 
-    // //Query the pool LUNA-UST Terraswap Calculate the current price pool
-    // let pool_info_msg = terraswap::pair::QueryMsg::Pool {};
-    // let query = WasmQuery::Smart {
-    //     contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(),
-    //     msg: to_binary(&pool_info_msg)?,
-    // };
-    // let pool_info: PoolResponse = deps.querier.query(&query.into())?;
-    //
-    // let luna_asset = pool_info
-    //     .assets
-    //     .iter()
-    //     .find(|&a| match a.info.clone() {
-    //         AssetInfo::Token { .. } => false,
-    //         AssetInfo::NativeToken { denom } => denom == "uluna",
-    //     })
-    //     .unwrap();
-    //
-    // let ust_asset = pool_info
-    //     .assets
-    //     .iter()
-    //     .find(|&a| match a.info.clone() {
-    //         AssetInfo::Token { .. } => false,
-    //         AssetInfo::NativeToken { denom } => denom == "uusd",
-    //     })
-    //     .unwrap();
-    //
-    // let predicted_price =
-    //     Uint128::from(1_000_000_u128).multiply_ratio(ust_asset.amount, luna_asset.amount);
+    let valid_data_price_feed = if data_price_feed.len() > 9 {
+        None
+    }else {
+        Some(data_price_feed[5])
+    };
 
-    let predicted_price = data_price_feed_average.price;
+    let predicted_price = if let Some(price_feed) =  valid_data_price_feed {
+        price_feed.price
+    }else{
+        Uint128::zero()
+    };
+
+    let raw_worker= if let Some(price_feed) = valid_data_price_feed {
+        Some(deps.api.addr_canonicalize(&price_feed.worker)?)
+    }else {
+        None
+    };
 
     let mut res = Response::new();
     // Resolve the past prediction
     if state.round != 0 {
+
         let prediction = PREDICTIONS.load(deps.storage, &(state.round - 1).to_be_bytes())?;
         // Check if not expired and prediction up and down are not zero
         let is_success = env.block.time.seconds() < prediction.expire_time
             && !prediction.up.is_zero()
             && !prediction.down.is_zero()
-            && prediction.locked_price != predicted_price;
+            && prediction.locked_price != predicted_price && valid_data_price_feed.is_some();
 
         let is_up = predicted_price > prediction.locked_price;
         // Update the current prediction
@@ -373,6 +361,13 @@ pub fn try_resolve_prediction(
                 if is_success {
                     update_prediction.is_up = Some(is_up);
                     update_prediction.resolved_price = predicted_price;
+                    if raw_worker.is_some(){
+                        if update_prediction.oracle_price_workers.is_some() {
+                            update_prediction.clone().oracle_price_workers.unwrap().push(raw_worker.clone().unwrap())
+                        }else {
+                            update_prediction.oracle_price_workers = Some(vec![raw_worker.clone().unwrap()]);
+                        }
+                    }
                 }
                 update_prediction.success = is_success;
                 Ok(update_prediction)
@@ -414,7 +409,14 @@ pub fn try_resolve_prediction(
         |prediction| -> Result<_, ContractError> {
             let mut update_prediction = prediction.unwrap();
             update_prediction.locked_price = predicted_price;
-            update_prediction.oracle_price_worker = Some(deps.api.addr_canonicalize(data_price_feed_average.worker.as_str())?);
+            if raw_worker.is_some(){
+                if update_prediction.oracle_price_workers.is_some() {
+                    update_prediction.clone().oracle_price_workers.unwrap().push(raw_worker.unwrap())
+                }else {
+                    update_prediction.oracle_price_workers = Some(vec![raw_worker.unwrap()]);
+                }
+            }
+
             Ok(update_prediction)
         },
     )?;
@@ -442,7 +444,7 @@ pub fn try_resolve_prediction(
                 .seconds(),
             success: false,
             is_up: None,
-            oracle_price_worker: None
+            oracle_price_workers: None
         },
     )?;
 
@@ -469,7 +471,7 @@ fn query_state(deps: Deps) -> StdResult<StateResponse> {
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
-        pool_address: deps.api.addr_humanize(&config.pool_address)?.to_string(),
+        oracle_price_feed_address: deps.api.addr_humanize(&config.oracle_price_feed_address)?.to_string(),
         round_time: config.round_time,
         limit_time: config.limit_time,
         denom: config.denom,
@@ -528,7 +530,7 @@ mod tests {
             Uint128::new(955_000_000u128),
         );
         let msg = InstantiateMsg {
-            pool_address: "terraswap".to_string(),
+            oracle_price_feed_address: "oracle".to_string(),
             collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
@@ -577,7 +579,7 @@ mod tests {
             Uint128::new(955_000_000u128),
         );
         let msg = InstantiateMsg {
-            pool_address: "terraswap".to_string(),
+            oracle_price_feed_address: "oracle".to_string(),
             collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
@@ -718,7 +720,7 @@ mod tests {
         );
 
         let msg = InstantiateMsg {
-            pool_address: "terraswap".to_string(),
+            oracle_price_feed_address: "oracle".to_string(),
             collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
@@ -882,7 +884,7 @@ mod tests {
         );
 
         let msg = InstantiateMsg {
-            pool_address: "terraswap".to_string(),
+            oracle_price_feed_address: "oracle".to_string(),
             collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
