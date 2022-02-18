@@ -376,7 +376,7 @@ pub fn try_resolve_prediction(
             .unwrap()
     );
 
-    let valid_data_price_feed = if data_price_feed.len() > 9 {
+    let valid_data_price_feed = if data_price_feed.len() > 8 {
         Some(data_price_feed[5])
     } else {
         None
