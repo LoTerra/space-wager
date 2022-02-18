@@ -43,11 +43,10 @@ pub enum QueryMsg {
     // Games { start_after: Option<u64>, limit: Option<u64> },
 }
 
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OraclePriceFeedQueryMsg {
-    State{},
+    State {},
     GetListPriceFeed {
         start_after: Option<u64>,
         limit: Option<u32>,
@@ -86,7 +85,7 @@ pub struct OraclePriceFeedResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct OracleListPriceFeedResponse {
-    pub list: Vec<OraclePriceFeedResponse>
+    pub list: Vec<OraclePriceFeedResponse>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -99,5 +98,5 @@ pub struct PredictionInfo {
     pub expire_time: u64,
     pub success: bool,
     pub is_up: Option<bool>,
-    pub oracle_price_workers: Option<Vec<String>>
+    pub oracle_price_workers: Option<Vec<String>>,
 }

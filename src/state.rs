@@ -32,7 +32,7 @@ pub struct Prediction {
     pub expire_time: u64,
     pub success: bool,
     pub is_up: Option<bool>,
-    pub oracle_price_workers: Option<Vec<CanonicalAddr>>
+    pub oracle_price_workers: Option<Vec<CanonicalAddr>>,
 }
 
 pub const PREDICTIONS: Map<&[u8], Prediction> = Map::new("predictions");

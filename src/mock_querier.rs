@@ -1,3 +1,7 @@
+use crate::msg::{
+    OracleListPriceFeedResponse, OraclePriceFeedQueryMsg, OraclePriceFeedResponse,
+    OraclePriceFeedStateResponse,
+};
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
     from_slice, to_binary, Addr, Api, BalanceResponse, BankQuery, Binary, Coin, ContractResult,
@@ -6,7 +10,6 @@ use cosmwasm_std::{
 };
 use std::str::FromStr;
 use terra_cosmwasm::{TaxCapResponse, TaxRateResponse, TerraQuery, TerraQueryWrapper};
-use crate::msg::{OracleListPriceFeedResponse, OraclePriceFeedQueryMsg, OraclePriceFeedResponse, OraclePriceFeedStateResponse};
 
 pub const MOCK_HUB_CONTRACT_ADDR: &str = "hub";
 pub const MOCK_CW20_CONTRACT_ADDR: &str = "lottery";
@@ -71,7 +74,7 @@ impl WasmMockQuerier {
                             pool_address: "astroport".to_string(),
                             round: 14,
                             denom_one: "uusd".to_string(),
-                            denom_two: "uluna".to_string()
+                            denom_two: "uluna".to_string(),
                         };
                         SystemResult::Ok(ContractResult::from(to_binary(&msg_state)))
                     } else {
@@ -90,92 +93,92 @@ impl WasmMockQuerier {
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797350,
                                     price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797360,
                                     price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797370,
                                     price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797380,
                                     price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797390,
                                     price: Uint128::from(55_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797400,
                                     price: Uint128::from(56_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797409,
                                     price: Uint128::from(50_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797419,
                                     price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797429,
                                     price: Uint128::from(51_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797439,
                                     price: Uint128::from(59_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797449,
                                     price: Uint128::from(65_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797459,
                                     price: Uint128::from(45_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797469,
                                     price: Uint128::from(90_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797479,
                                     price: Uint128::from(58_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797489,
                                     price: Uint128::from(59_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797499,
                                     price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797719,
                                     price: Uint128::from(45_000_000u128),
-                                    worker: "rico".to_string()
+                                    worker: "rico".to_string(),
                                 },
-                            ]
+                            ],
                         };
                         SystemResult::Ok(ContractResult::from(to_binary(&msg_pool)))
-                    }
+                    };
                 }
                 panic!("DO NOT ENTER HERE")
             }
@@ -207,6 +210,7 @@ impl WasmMockQuerier {
     }
     // configure the mint whitelist mock querier
     pub fn pool_token(&mut self, amount_native: Uint128, amount_token: Uint128) {
-        self.oracle_price_feed_response = OraclePriceFeedInfoResponse::new(amount_native, amount_token)
+        self.oracle_price_feed_response =
+            OraclePriceFeedInfoResponse::new(amount_native, amount_token)
     }
 }
