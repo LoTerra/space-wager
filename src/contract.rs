@@ -403,6 +403,7 @@ pub fn try_resolve_prediction(
             && !prediction.up.is_zero()
             && !prediction.down.is_zero()
             && prediction.locked_price != predicted_price
+            && !prediction.locked_price.is_zero()
             && valid_data_price_feed.is_some();
 
         let is_up = predicted_price > prediction.locked_price;
