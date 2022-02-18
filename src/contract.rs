@@ -315,9 +315,11 @@ pub fn try_resolve_prediction(
     let query_wasm_list_price_feed = WasmQuery::Smart { contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(), msg: to_binary(&query_list_price_feed)?};
     let list_price_feed_info: OracleListPriceFeedResponse = deps.querier.query(&query_wasm_list_price_feed.into())?;
 
-    let data_price_feed = list_price_feed_info.list.iter().filter(
+    let mut data_price_feed = list_price_feed_info.list.iter().filter(
         |&price_feed| price_feed.timestamp > env.block.time.seconds()
     ).collect::<Vec<OraclePriceFeedResponse>>();
+    data_price_feed.sort_by(|a, b| a.price.cmp(&b.price));
+
     let data_price_feed_average = data_price_feed[5].clone();
 
     // //Query the pool LUNA-UST Terraswap Calculate the current price pool
