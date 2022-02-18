@@ -80,16 +80,16 @@ impl WasmMockQuerier {
                     } else {
                         let msg_pool = OracleListPriceFeedResponse {
                             list: vec![
-                                // OraclePriceFeedResponse {
-                                //     timestamp: 1571797330,
-                                //     price: Uint128::from(52_000_000u128),
-                                //     worker: "rico".to_string()
-                                // },
-                                // OraclePriceFeedResponse {
-                                //     timestamp: 1571797340,
-                                //     price: Uint128::from(52_000_000u128),
-                                //     worker: "rico".to_string()
-                                // },
+                                OraclePriceFeedResponse {
+                                    timestamp: 1571797330,
+                                    price: Uint128::from(52_000_000u128),
+                                    worker: "rico".to_string()
+                                },
+                                OraclePriceFeedResponse {
+                                    timestamp: 1571797340,
+                                    price: Uint128::from(52_000_000u128),
+                                    worker: "rico".to_string()
+                                },
                                 OraclePriceFeedResponse {
                                     timestamp: 1571797350,
                                     price: Uint128::from(52_000_000u128),

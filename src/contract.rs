@@ -377,9 +377,9 @@ pub fn try_resolve_prediction(
     );
 
     let valid_data_price_feed = if data_price_feed.len() > 9 {
-        None
-    } else {
         Some(data_price_feed[5])
+    } else {
+        None
     };
 
     let predicted_price = if let Some(price_feed) = valid_data_price_feed {
@@ -387,6 +387,10 @@ pub fn try_resolve_prediction(
     } else {
         Uint128::zero()
     };
+    println!(
+        "predicted_price = {:?}",
+        predicted_price
+    );
 
     let raw_worker = if let Some(price_feed) = valid_data_price_feed {
         Some(deps.api.addr_canonicalize(&price_feed.worker)?)
@@ -402,8 +406,8 @@ pub fn try_resolve_prediction(
         let is_success = env.block.time.seconds() < prediction.expire_time
             && !prediction.up.is_zero()
             && !prediction.down.is_zero()
-            && prediction.locked_price != predicted_price
             && !prediction.locked_price.is_zero()
+            && prediction.locked_price != predicted_price
             && valid_data_price_feed.is_some();
 
         let is_up = predicted_price > prediction.locked_price;
