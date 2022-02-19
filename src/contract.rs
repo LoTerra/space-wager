@@ -10,7 +10,7 @@ use std::convert::TryInto;
 use std::ops::{Add, Mul, Sub};
 
 use crate::error::ContractError;
-use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, OracleListPriceFeedResponse, OraclePriceFeedQueryMsg, OraclePriceFeedResponse, OraclePriceFeedStateResponse, QueryMsg, StateResponse};
+use crate::msg::{CumulativePricesResponse, AstroportQueryMsg, ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, OracleListPriceFeedResponse, OraclePriceFeedQueryMsg, OraclePriceFeedResponse, OraclePriceFeedStateResponse, QueryMsg, StateResponse};
 
 use crate::state::{Config, Game, Prediction, State, CONFIG, GAMES, PREDICTIONS, STATE};
 use crate::taxation::deduct_tax;
@@ -29,15 +29,14 @@ pub fn instantiate(
     let state = State { round: 0 };
 
     let config = Config {
-        oracle_price_feed_address: deps
+        pool_address: deps
             .api
-            .addr_canonicalize(msg.oracle_price_feed_address.as_str())?,
+            .addr_canonicalize(msg.pool_address.as_str())?,
         collector_address: deps.api.addr_canonicalize(msg.collector_address.as_str())?,
         round_time: msg.round_time,
         limit_time: msg.limit_time,
         denom: msg.denom,
         collector_fee: msg.collector_fee,
-        oracle_price_feed_fee: msg.oracle_price_feed_fee
     };
 
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -62,7 +61,10 @@ pub fn instantiate(
                 .seconds(),
             success: false,
             is_up: None,
-            oracle_price_workers: None,
+            cumulative_last1: None,
+            block_time1: None,
+            cumulative_last2: None,
+            block_time2: None
         },
     )?;
 
@@ -308,92 +310,16 @@ pub fn try_resolve_prediction(
     if prediction_now.closing_time > env.block.time.seconds() {
         return Err(ContractError::PredictionStillInProgress {});
     }
-    let query_state_price_feed = OraclePriceFeedQueryMsg::State {};
-    let query_wasm_state = WasmQuery::Smart {
-        contract_addr: deps
-            .api
-            .addr_humanize(&config.oracle_price_feed_address)?
-            .to_string(),
-        msg: to_binary(&query_state_price_feed)?,
-    };
-    let state_info: OraclePriceFeedStateResponse = deps.querier.query(&query_wasm_state.into())?;
 
-    let query_list_price_feed = OraclePriceFeedQueryMsg::GetListPriceFeed {
-        start_after: Some(state_info.round),
-        limit: Some(MAX_LIMIT_QUERY),
-    };
-    let query_wasm_list_price_feed = WasmQuery::Smart {
-        contract_addr: deps
-            .api
-            .addr_humanize(&config.oracle_price_feed_address)?
-            .to_string(),
-        msg: to_binary(&query_list_price_feed)?,
-    };
-    let list_price_feed_info: OracleListPriceFeedResponse =
-        deps.querier.query(&query_wasm_list_price_feed.into())?;
 
-    let mut data_price_feed = list_price_feed_info
-        .list
-        .iter()
-        .filter(|price_feed| {
-            price_feed.timestamp
-                <= prediction_now
-                    .closing_time
-                    .checked_sub(config.round_time)
-                    .unwrap()
-                && price_feed.timestamp
-                    >= prediction_now
-                        .closing_time
-                        .checked_sub(config.round_time)
-                        .unwrap()
-                        .checked_sub(config.round_time)
-                        .unwrap()
-        })
-        .collect::<Vec<&OraclePriceFeedResponse>>();
-    data_price_feed.sort_by(|a, b| a.price.cmp(&b.price));
-
-    println!("{:?}", state.round);
-    println!("{:?}", env.block.time.seconds());
-    println!("{:?}", data_price_feed);
-    println!("{:?}", data_price_feed.len());
-    println!(
-        "{:?}",
-        prediction_now
-            .closing_time
-            .checked_sub(config.round_time)
-            .unwrap()
-    );
-    println!(
-        "{:?}",
-        prediction_now
-            .closing_time
-            .checked_sub(config.round_time)
-            .unwrap()
-            .checked_sub(config.round_time)
-            .unwrap()
-    );
-
-    let valid_data_price_feed = if data_price_feed.len() > 8 {
-        Some(data_price_feed[5])
-    } else {
-        None
+    // //Query the pool LUNA-UST Astroport Calculate the current price pool
+    let pool_info_msg = AstroportQueryMsg::CumulativePrices {};
+    let query = WasmQuery::Smart {
+        contract_addr: deps.api.addr_humanize(&config.pool_address)?.to_string(),
+        msg: to_binary(&pool_info_msg)?,
     };
+    let pool_info: CumulativePricesResponse = deps.querier.query(&query.into())?;
 
-    let predicted_price = if let Some(price_feed) = valid_data_price_feed {
-        price_feed.price
-    } else {
-        Uint128::zero()
-    };
-    println!(
-        "predicted_price = {:?}",
-        predicted_price
-    );
-
-    let raw_worker = if let Some(price_feed) = valid_data_price_feed {
-        Some(deps.api.addr_canonicalize(&price_feed.worker)?)
-    } else {
-        None
-    };
 
     let mut res = Response::new();
     // Resolve the past prediction
@@ -403,9 +329,23 @@ pub fn try_resolve_prediction(
         let is_success = env.block.time.seconds() < prediction.expire_time
             && !prediction.up.is_zero()
             && !prediction.down.is_zero()
-            && !prediction.locked_price.is_zero()
-            && prediction.locked_price != predicted_price
-            && valid_data_price_feed.is_some();
+            && prediction.cumulative_last1.is_some()
+            && prediction.block_time1.is_some()
+            && prediction.cumulative_last1.unwrap() != pool_info.price1_cumulative_last;
+
+        let predicted_price = if is_success {
+            let price = if prediction.cumulative_last1.unwrap() > pool_info.price1_cumulative_last {
+                prediction.cumulative_last1.unwrap().checked_sub(pool_info.price1_cumulative_last).unwrap()
+            }else {
+                pool_info.price1_cumulative_last.checked_sub(prediction.cumulative_last1.unwrap()).unwrap()
+            };
+            let block_time = env.block.time.seconds().checked_sub(prediction.block_time1.unwrap()).unwrap();
+
+            Uint128::zero().multiply_ratio(price.u128(), block_time as u128)
+
+        } else {
+            Uint128::zero()
+        };
 
         let is_up = predicted_price > prediction.locked_price;
         // Update the current prediction
@@ -417,18 +357,6 @@ pub fn try_resolve_prediction(
                 if is_success {
                     update_prediction.is_up = Some(is_up);
                     update_prediction.resolved_price = predicted_price;
-                    if raw_worker.is_some() {
-                        if update_prediction.oracle_price_workers.is_some() {
-                            update_prediction
-                                .clone()
-                                .oracle_price_workers
-                                .unwrap()
-                                .push(raw_worker.clone().unwrap())
-                        } else {
-                            update_prediction.oracle_price_workers =
-                                Some(vec![raw_worker.clone().unwrap()]);
-                        }
-                    }
                 }
                 update_prediction.success = is_success;
                 Ok(update_prediction)
@@ -460,6 +388,7 @@ pub fn try_resolve_prediction(
             ));
         }
     }
+
     res.attributes
         .push(Attribute::new("action", "resolve_prediction"));
 
@@ -469,18 +398,8 @@ pub fn try_resolve_prediction(
         &state.round.to_be_bytes(),
         |prediction| -> Result<_, ContractError> {
             let mut update_prediction = prediction.unwrap();
-            update_prediction.locked_price = predicted_price;
-            if raw_worker.is_some() {
-                if update_prediction.oracle_price_workers.is_some() {
-                    update_prediction
-                        .clone()
-                        .oracle_price_workers
-                        .unwrap()
-                        .push(raw_worker.unwrap())
-                } else {
-                    update_prediction.oracle_price_workers = Some(vec![raw_worker.unwrap()]);
-                }
-            }
+            update_prediction.cumulative_last1 = Some(pool_info.price1_cumulative_last);
+            update_prediction.block_time1 = Some(env.block.time.seconds());
 
             Ok(update_prediction)
         },
@@ -509,7 +428,10 @@ pub fn try_resolve_prediction(
                 .seconds(),
             success: false,
             is_up: None,
-            oracle_price_workers: None,
+            cumulative_last1: None,
+            block_time1: None,
+            cumulative_last2: None,
+            block_time2: None
         },
     )?;
 
@@ -538,7 +460,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     Ok(ConfigResponse {
         oracle_price_feed_address: deps
             .api
-            .addr_humanize(&config.oracle_price_feed_address)?
+            .addr_humanize(&config.pool_address)?
             .to_string(),
         collector_address: deps
             .api
@@ -548,7 +470,6 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         limit_time: config.limit_time,
         denom: config.denom,
         collector_fee: config.collector_fee,
-        oracle_price_feed_fee: config.oracle_price_feed_fee
     })
 }
 fn query_game(deps: Deps, address: String, round: u64) -> StdResult<Game> {
@@ -610,13 +531,12 @@ mod tests {
             Uint128::new(955_000_000u128),
         );
         let msg = InstantiateMsg {
-            oracle_price_feed_address: "oracle".to_string(),
+            pool_address: "oracle".to_string(),
             collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
             collector_fee: Decimal::from_str("0.05").unwrap(),
-            oracle_price_feed_fee: Decimal::from_str("0.005").unwrap()
         };
         let info = mock_info("creator", &coins(1000, "earth"));
 
@@ -660,13 +580,12 @@ mod tests {
             Uint128::new(955_000_000u128),
         );
         let msg = InstantiateMsg {
-            oracle_price_feed_address: "oracle".to_string(),
+            pool_address: "oracle".to_string(),
             collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
             collector_fee: Decimal::from_str("0.05").unwrap(),
-            oracle_price_feed_fee: Decimal::from_str("0.005").unwrap()
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -802,13 +721,12 @@ mod tests {
         );
 
         let msg = InstantiateMsg {
-            oracle_price_feed_address: "oracle".to_string(),
+            pool_address: "oracle".to_string(),
             collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
             collector_fee: Decimal::from_str("0.05").unwrap(),
-            oracle_price_feed_fee: Decimal::from_str("0.005").unwrap()
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -967,13 +885,12 @@ mod tests {
         );
 
         let msg = InstantiateMsg {
-            oracle_price_feed_address: "oracle".to_string(),
+            pool_address: "oracle".to_string(),
             collector_address: "collector".to_string(),
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
             collector_fee: Decimal::from_str("0.05").unwrap(),
-            oracle_price_feed_fee: Decimal::from_str("0.005").unwrap()
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();

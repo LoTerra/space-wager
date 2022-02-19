@@ -6,13 +6,12 @@ use cw_storage_plus::{Item, Map};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
-    pub oracle_price_feed_address: CanonicalAddr,
+    pub pool_address: CanonicalAddr,
     pub collector_address: CanonicalAddr,
     pub round_time: u64,
     pub limit_time: u64,
     pub denom: String,
     pub collector_fee: Decimal,
-    pub oracle_price_feed_fee: Decimal,
 }
 pub const CONFIG: Item<Config> = Item::new("config");
 
@@ -33,7 +32,10 @@ pub struct Prediction {
     pub expire_time: u64,
     pub success: bool,
     pub is_up: Option<bool>,
-    pub oracle_price_workers: Option<Vec<CanonicalAddr>>,
+    pub cumulative_last1: Option<Uint128>,
+    pub block_time1: Option<u64>,
+    pub cumulative_last2: Option<Uint128>,
+    pub block_time2: Option<u64>
 }
 
 pub const PREDICTIONS: Map<&[u8], Prediction> = Map::new("predictions");

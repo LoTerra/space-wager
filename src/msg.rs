@@ -1,16 +1,15 @@
-use cosmwasm_std::{Decimal, Uint128};
+use cosmwasm_std::{Addr, Decimal, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
-    pub oracle_price_feed_address: String,
+    pub pool_address: String,
     pub collector_address: String,
     pub round_time: u64,
     pub limit_time: u64,
     pub denom: String,
     pub collector_fee: Decimal,
-    pub oracle_price_feed_fee: Decimal
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -44,16 +43,6 @@ pub enum QueryMsg {
     // Games { start_after: Option<u64>, limit: Option<u64> },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum OraclePriceFeedQueryMsg {
-    State {},
-    GetListPriceFeed {
-        start_after: Option<u64>,
-        limit: Option<u32>,
-    },
-}
-
 // We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct StateResponse {
@@ -68,28 +57,6 @@ pub struct ConfigResponse {
     pub limit_time: u64,
     pub denom: String,
     pub collector_fee: Decimal,
-    pub oracle_price_feed_fee: Decimal,
-}
-
-// We define a custom struct for each query response
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct OraclePriceFeedStateResponse {
-    pub pool_address: String,
-    pub round: u64,
-    pub denom_one: String,
-    pub denom_two: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct OraclePriceFeedResponse {
-    pub timestamp: u64,
-    pub price: Uint128,
-    pub worker: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct OracleListPriceFeedResponse {
-    pub list: Vec<OraclePriceFeedResponse>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -102,8 +69,41 @@ pub struct PredictionInfo {
     pub expire_time: u64,
     pub success: bool,
     pub is_up: Option<bool>,
-    pub oracle_price_workers: Option<Vec<String>>,
+    pub cumulative_last1: Option<Uint128>,
+    pub block_time1: Option<u64>,
+    pub cumulative_last2: Option<Uint128>,
+    pub block_time2: Option<u64>
+}
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MigrateMsg {}
+
+// Astroport
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AstroportQueryMsg {
+    CumulativePrices {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct MigrateMsg {}
+pub enum AssetInfo {
+    Token {
+        contract_addr: Addr,
+    },
+    NativeToken {
+        denom: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Asset {
+    pub info: AssetInfo,
+    pub amount: Uint128,
+}
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct CumulativePricesResponse {
+    pub assets: [Asset; 2],
+    pub total_share: Uint128,
+    pub price0_cumulative_last: Uint128,
+    pub price1_cumulative_last: Uint128,
+}
+
