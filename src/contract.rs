@@ -368,6 +368,8 @@ pub fn try_resolve_prediction(
                     update_prediction.is_up = Some(is_up);
                     update_prediction.resolved_price = predicted_price;
                 }
+                update_prediction.block_time2 = Some(env.block.time.seconds());
+                update_prediction.cumulative_last2 = Some(pool_info.price1_cumulative_last);
                 update_prediction.success = is_success;
                 Ok(update_prediction)
             },
@@ -397,23 +399,36 @@ pub fn try_resolve_prediction(
                 predicted_price.to_string(),
             ));
         }
-    }
 
+        // Update locked price of the current prediction
+        PREDICTIONS.update(
+            deps.storage,
+            &state.round.to_be_bytes(),
+            |prediction| -> Result<_, ContractError> {
+                let mut update_prediction = prediction.unwrap();
+                update_prediction.locked_price = predicted_price;
+                update_prediction.cumulative_last1 = Some(pool_info.price1_cumulative_last);
+                update_prediction.block_time1 = Some(env.block.time.seconds());
+
+                Ok(update_prediction)
+            },
+        )?;
+    } else {
+        // Update locked price of the current prediction
+        PREDICTIONS.update(
+            deps.storage,
+            &state.round.to_be_bytes(),
+            |prediction| -> Result<_, ContractError> {
+                let mut update_prediction = prediction.unwrap();
+                update_prediction.cumulative_last1 = Some(pool_info.price1_cumulative_last);
+                update_prediction.block_time1 = Some(env.block.time.seconds());
+
+                Ok(update_prediction)
+            },
+        )?;
+    }
     res.attributes
         .push(Attribute::new("action", "resolve_prediction"));
-
-    // Update locked price of the current prediction
-    PREDICTIONS.update(
-        deps.storage,
-        &state.round.to_be_bytes(),
-        |prediction| -> Result<_, ContractError> {
-            let mut update_prediction = prediction.unwrap();
-            update_prediction.cumulative_last1 = Some(pool_info.price1_cumulative_last);
-            update_prediction.block_time1 = Some(env.block.time.seconds());
-
-            Ok(update_prediction)
-        },
-    )?;
 
     // Increment the round
     state.round += 1;
