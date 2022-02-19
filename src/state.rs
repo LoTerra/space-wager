@@ -12,6 +12,7 @@ pub struct Config {
     pub limit_time: u64,
     pub denom: String,
     pub collector_fee: Decimal,
+    pub oracle_price_feed_fee: Decimal,
 }
 pub const CONFIG: Item<Config> = Item::new("config");
 

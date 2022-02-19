@@ -9,7 +9,8 @@ pub struct InstantiateMsg {
     pub round_time: u64,
     pub limit_time: u64,
     pub denom: String,
-    pub collector_ratio: Decimal,
+    pub collector_fee: Decimal,
+    pub oracle_price_feed_fee: Decimal
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -62,9 +63,12 @@ pub struct StateResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
     pub oracle_price_feed_address: String,
+    pub collector_address: String,
     pub round_time: u64,
     pub limit_time: u64,
     pub denom: String,
+    pub collector_fee: Decimal,
+    pub oracle_price_feed_fee: Decimal,
 }
 
 // We define a custom struct for each query response
@@ -100,3 +104,6 @@ pub struct PredictionInfo {
     pub is_up: Option<bool>,
     pub oracle_price_workers: Option<Vec<String>>,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MigrateMsg {}

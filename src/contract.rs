@@ -1,7 +1,7 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Attribute, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Decimal, Deps, DepsMut,
+    to_binary, Attribute, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut,
     Env, MessageInfo, Order, Response, StdResult, SubMsg, Uint128, WasmQuery,
 };
 use cw2::set_contract_version;
@@ -10,11 +10,7 @@ use std::convert::TryInto;
 use std::ops::{Add, Mul, Sub};
 
 use crate::error::ContractError;
-use crate::msg::{
-    ConfigResponse, ExecuteMsg, InstantiateMsg, OracleListPriceFeedResponse,
-    OraclePriceFeedQueryMsg, OraclePriceFeedResponse, OraclePriceFeedStateResponse, QueryMsg,
-    StateResponse,
-};
+use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, OracleListPriceFeedResponse, OraclePriceFeedQueryMsg, OraclePriceFeedResponse, OraclePriceFeedStateResponse, QueryMsg, StateResponse};
 
 use crate::state::{Config, Game, Prediction, State, CONFIG, GAMES, PREDICTIONS, STATE};
 use crate::taxation::deduct_tax;
@@ -40,7 +36,8 @@ pub fn instantiate(
         round_time: msg.round_time,
         limit_time: msg.limit_time,
         denom: msg.denom,
-        collector_fee: msg.collector_ratio,
+        collector_fee: msg.collector_fee,
+        oracle_price_feed_fee: msg.oracle_price_feed_fee
     };
 
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -543,9 +540,15 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
             .api
             .addr_humanize(&config.oracle_price_feed_address)?
             .to_string(),
+        collector_address: deps
+            .api
+            .addr_humanize(&config.collector_address)?
+            .to_string(),
         round_time: config.round_time,
         limit_time: config.limit_time,
         denom: config.denom,
+        collector_fee: config.collector_fee,
+        oracle_price_feed_fee: config.oracle_price_feed_fee
     })
 }
 fn query_game(deps: Deps, address: String, round: u64) -> StdResult<Game> {
@@ -583,6 +586,12 @@ fn query_predictions(
     Ok(prediction)
 }
 
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    Ok(Response::default())
+}
+
+
 #[cfg(test)]
 mod tests {
 
@@ -606,7 +615,8 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
-            collector_ratio: Decimal::from_str("0.05").unwrap(),
+            collector_fee: Decimal::from_str("0.05").unwrap(),
+            oracle_price_feed_fee: Decimal::from_str("0.005").unwrap()
         };
         let info = mock_info("creator", &coins(1000, "earth"));
 
@@ -655,7 +665,8 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
-            collector_ratio: Decimal::from_str("0.05").unwrap(),
+            collector_fee: Decimal::from_str("0.05").unwrap(),
+            oracle_price_feed_fee: Decimal::from_str("0.005").unwrap()
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -796,7 +807,8 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
-            collector_ratio: Decimal::from_str("0.05").unwrap(),
+            collector_fee: Decimal::from_str("0.05").unwrap(),
+            oracle_price_feed_fee: Decimal::from_str("0.005").unwrap()
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -960,7 +972,8 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
-            collector_ratio: Decimal::from_str("0.05").unwrap(),
+            collector_fee: Decimal::from_str("0.05").unwrap(),
+            oracle_price_feed_fee: Decimal::from_str("0.005").unwrap()
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
