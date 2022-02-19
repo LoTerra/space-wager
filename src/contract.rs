@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Attribute, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut,
-    Env, MessageInfo, Order, Response, StdResult, SubMsg, Uint128, WasmQuery,
+    to_binary, Attribute, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env,
+    MessageInfo, Order, Response, StdResult, SubMsg, Uint128, WasmQuery,
 };
 use cw2::set_contract_version;
 use cw_storage_plus::Bound;
@@ -10,7 +10,10 @@ use std::convert::TryInto;
 use std::ops::{Add, Mul, Sub};
 
 use crate::error::ContractError;
-use crate::msg::{CumulativePricesResponse, AstroportQueryMsg, ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, OracleListPriceFeedResponse, OraclePriceFeedQueryMsg, OraclePriceFeedResponse, OraclePriceFeedStateResponse, QueryMsg, StateResponse};
+use crate::msg::{
+    AstroportQueryMsg, ConfigResponse, CumulativePricesResponse, ExecuteMsg, InstantiateMsg,
+    MigrateMsg, QueryMsg, StateResponse,
+};
 
 use crate::state::{Config, Game, Prediction, State, CONFIG, GAMES, PREDICTIONS, STATE};
 use crate::taxation::deduct_tax;
@@ -29,9 +32,7 @@ pub fn instantiate(
     let state = State { round: 0 };
 
     let config = Config {
-        pool_address: deps
-            .api
-            .addr_canonicalize(msg.pool_address.as_str())?,
+        pool_address: deps.api.addr_canonicalize(msg.pool_address.as_str())?,
         collector_address: deps.api.addr_canonicalize(msg.collector_address.as_str())?,
         round_time: msg.round_time,
         limit_time: msg.limit_time,
@@ -64,7 +65,7 @@ pub fn instantiate(
             cumulative_last1: None,
             block_time1: None,
             cumulative_last2: None,
-            block_time2: None
+            block_time2: None,
         },
     )?;
 
@@ -311,7 +312,6 @@ pub fn try_resolve_prediction(
         return Err(ContractError::PredictionStillInProgress {});
     }
 
-
     // //Query the pool LUNA-UST Astroport Calculate the current price pool
     let pool_info_msg = AstroportQueryMsg::CumulativePrices {};
     let query = WasmQuery::Smart {
@@ -319,7 +319,6 @@ pub fn try_resolve_prediction(
         msg: to_binary(&pool_info_msg)?,
     };
     let pool_info: CumulativePricesResponse = deps.querier.query(&query.into())?;
-
 
     let mut res = Response::new();
     // Resolve the past prediction
@@ -335,14 +334,25 @@ pub fn try_resolve_prediction(
 
         let predicted_price = if is_success {
             let price = if prediction.cumulative_last1.unwrap() > pool_info.price1_cumulative_last {
-                prediction.cumulative_last1.unwrap().checked_sub(pool_info.price1_cumulative_last).unwrap()
-            }else {
-                pool_info.price1_cumulative_last.checked_sub(prediction.cumulative_last1.unwrap()).unwrap()
+                prediction
+                    .cumulative_last1
+                    .unwrap()
+                    .checked_sub(pool_info.price1_cumulative_last)
+                    .unwrap()
+            } else {
+                pool_info
+                    .price1_cumulative_last
+                    .checked_sub(prediction.cumulative_last1.unwrap())
+                    .unwrap()
             };
-            let block_time = env.block.time.seconds().checked_sub(prediction.block_time1.unwrap()).unwrap();
+            let block_time = env
+                .block
+                .time
+                .seconds()
+                .checked_sub(prediction.block_time1.unwrap())
+                .unwrap();
 
             Uint128::zero().multiply_ratio(price.u128(), block_time as u128)
-
         } else {
             Uint128::zero()
         };
@@ -431,7 +441,7 @@ pub fn try_resolve_prediction(
             cumulative_last1: None,
             block_time1: None,
             cumulative_last2: None,
-            block_time2: None
+            block_time2: None,
         },
     )?;
 
@@ -458,10 +468,7 @@ fn query_state(deps: Deps) -> StdResult<StateResponse> {
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
-        oracle_price_feed_address: deps
-            .api
-            .addr_humanize(&config.pool_address)?
-            .to_string(),
+        oracle_price_feed_address: deps.api.addr_humanize(&config.pool_address)?.to_string(),
         collector_address: deps
             .api
             .addr_humanize(&config.collector_address)?
@@ -512,12 +519,12 @@ pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Respons
     Ok(Response::default())
 }
 
-
 #[cfg(test)]
 mod tests {
 
     use super::*;
     use crate::mock_querier::mock_dependencies_custom;
+    use crate::msg::{Asset, AssetInfo};
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::{attr, coins, from_binary, Addr, Api, Attribute, Coin};
     use std::ops::Add;
@@ -526,10 +533,10 @@ mod tests {
     #[test]
     fn proper_initialization() {
         let mut deps = mock_dependencies_custom(&[]);
-        deps.querier.pool_token(
-            Uint128::new(10_250_000_000u128),
-            Uint128::new(955_000_000u128),
-        );
+        // deps.querier.pool_token(
+        //     Uint128::new(10_250_000_000u128),
+        //     Uint128::new(955_000_000u128),
+        // );
         let msg = InstantiateMsg {
             pool_address: "oracle".to_string(),
             collector_address: "collector".to_string(),
@@ -575,10 +582,10 @@ mod tests {
     #[test]
     fn proper_make_prediction() {
         let mut deps = mock_dependencies_custom(&[]);
-        deps.querier.pool_token(
-            Uint128::new(10_250_000_000u128),
-            Uint128::new(955_000_000u128),
-        );
+        // deps.querier.pool_token(
+        //     Uint128::new(10_250_000_000u128),
+        //     Uint128::new(955_000_000u128),
+        // );
         let msg = InstantiateMsg {
             pool_address: "oracle".to_string(),
             collector_address: "collector".to_string(),
@@ -715,10 +722,10 @@ mod tests {
     #[test]
     fn proper_resolve_prediction() {
         let mut deps = mock_dependencies_custom(&[]);
-        deps.querier.pool_token(
-            Uint128::new(10_250_000_000u128),
-            Uint128::new(955_000_000u128),
-        );
+        // deps.querier.pool_token(
+        //     Uint128::new(10_250_000_000u128),
+        //     Uint128::new(955_000_000u128),
+        // );
 
         let msg = InstantiateMsg {
             pool_address: "oracle".to_string(),
@@ -732,8 +739,23 @@ mod tests {
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         deps.querier.pool_token(
-            Uint128::new(15_250_000_000u128),
-            Uint128::new(555_000_000u128),
+            [
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "uusd".to_string(),
+                    },
+                    amount: Uint128::from(87049666749971u128),
+                },
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "uluna".to_string(),
+                    },
+                    amount: Uint128::from(1728618730356u128),
+                },
+            ],
+            Uint128::from(11839025025386u128),
+            Uint128::from(73221779133u128),
+            Uint128::from(316728527698964u128),
         );
         // Player1 enter down
         let msg = ExecuteMsg::MakePrediction { up: false };
@@ -804,10 +826,6 @@ mod tests {
         let state = query_state(deps.as_ref()).unwrap();
         assert_eq!(state.round, 1);
 
-        deps.querier.pool_token(
-            Uint128::new(16_250_000_000u128),
-            Uint128::new(455_000_000u128),
-        );
         // Player1 enter down
         let msg = ExecuteMsg::MakePrediction { up: false };
         let info = mock_info(
@@ -836,10 +854,10 @@ mod tests {
             ]
         );
 
-        deps.querier.pool_token(
-            Uint128::new(56_250_000_000u128),
-            Uint128::new(255_000_000u128),
-        );
+        // deps.querier.pool_token(
+        //     Uint128::new(56_250_000_000u128),
+        //     Uint128::new(255_000_000u128),
+        // );
         // Player1 enter down
         let msg = ExecuteMsg::MakePrediction { up: false };
         let info = mock_info(
@@ -879,10 +897,6 @@ mod tests {
     #[test]
     fn proper_resolve_game() {
         let mut deps = mock_dependencies_custom(&[]);
-        deps.querier.pool_token(
-            Uint128::new(10_250_000_000u128),
-            Uint128::new(955_000_000u128),
-        );
 
         let msg = InstantiateMsg {
             pool_address: "oracle".to_string(),
@@ -896,8 +910,23 @@ mod tests {
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         deps.querier.pool_token(
-            Uint128::new(15_250_000_000u128),
-            Uint128::new(555_000_000u128),
+            [
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "uusd".to_string(),
+                    },
+                    amount: Uint128::from(87049666749971u128),
+                },
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "uluna".to_string(),
+                    },
+                    amount: Uint128::from(1728618730356u128),
+                },
+            ],
+            Uint128::from(11839025025386u128),
+            Uint128::from(73221779133u128),
+            Uint128::from(316728527698964u128),
         );
 
         // Player1 enter down
@@ -951,10 +980,10 @@ mod tests {
         assert_eq!(err, ContractError::PredictionStillInProgress {});
 
         // Resolve success
-        deps.querier.pool_token(
-            Uint128::new(1_250_000_000u128),
-            Uint128::new(955_000_000u128),
-        );
+        // deps.querier.pool_token(
+        //     Uint128::new(1_250_000_000u128),
+        //     Uint128::new(955_000_000u128),
+        // );
         let msg = ExecuteMsg::ResolvePrediction {};
         env.block.time = env.block.time.plus_seconds(config.round_time);
         let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
@@ -1010,10 +1039,10 @@ mod tests {
         let state = STATE.load(deps.as_ref().storage).unwrap();
         println!("{:?}", state);
 
-        deps.querier.pool_token(
-            Uint128::new(15_250_000_000u128),
-            Uint128::new(555_000_000u128),
-        );
+        // deps.querier.pool_token(
+        //     Uint128::new(15_250_000_000u128),
+        //     Uint128::new(555_000_000u128),
+        // );
 
         // Player1 enter down
         let msg = ExecuteMsg::MakePrediction { up: false };

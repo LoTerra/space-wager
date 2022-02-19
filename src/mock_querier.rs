@@ -1,7 +1,4 @@
-use crate::msg::{
-    OracleListPriceFeedResponse, OraclePriceFeedQueryMsg, OraclePriceFeedResponse,
-    OraclePriceFeedStateResponse,
-};
+use crate::msg::{Asset, AssetInfo, CumulativePricesResponse};
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
     from_slice, to_binary, Addr, Api, BalanceResponse, BankQuery, Binary, Coin, ContractResult,
@@ -30,19 +27,28 @@ pub fn mock_dependencies_custom(
 
 pub struct WasmMockQuerier {
     base: MockQuerier<TerraQueryWrapper>,
-    oracle_price_feed_response: OraclePriceFeedInfoResponse,
+    cumulative_price_response: CumulativePriceInfoResponse,
 }
 
-#[derive(Clone, Default)]
-pub struct OraclePriceFeedInfoResponse {
-    pub amount_token: Uint128,
-    pub amount_native: Uint128,
+#[derive(Clone)]
+pub struct CumulativePriceInfoResponse {
+    pub asset: [Asset; 2],
+    pub total_share: Uint128,
+    pub price0_cumulative_last: Uint128,
+    pub price1_cumulative_last: Uint128,
 }
-impl OraclePriceFeedInfoResponse {
-    pub fn new(amount_native: Uint128, amount_token: Uint128) -> Self {
-        OraclePriceFeedInfoResponse {
-            amount_native,
-            amount_token,
+impl CumulativePriceInfoResponse {
+    pub fn new(
+        asset: [Asset; 2],
+        total_share: Uint128,
+        price0_cumulative_last: Uint128,
+        price1_cumulative_last: Uint128,
+    ) -> Self {
+        CumulativePriceInfoResponse {
+            asset,
+            total_share,
+            price0_cumulative_last,
+            price1_cumulative_last,
         }
     }
 }
@@ -69,116 +75,17 @@ impl WasmMockQuerier {
             QueryRequest::Wasm(WasmQuery::Smart { contract_addr, msg }) => {
                 println!("{}", contract_addr);
                 if contract_addr == "oracle" {
-                    return if String::from_utf8(msg.to_vec()).unwrap() == "{\"state\":{}}" {
-                        let msg_state = OraclePriceFeedStateResponse {
-                            pool_address: "astroport".to_string(),
-                            round: 14,
-                            denom_one: "uusd".to_string(),
-                            denom_two: "uluna".to_string(),
-                        };
-                        SystemResult::Ok(ContractResult::from(to_binary(&msg_state)))
-                    } else {
-                        let msg_pool = OracleListPriceFeedResponse {
-                            list: vec![
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797330,
-                                    price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string()
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797340,
-                                    price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string()
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797350,
-                                    price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797360,
-                                    price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797370,
-                                    price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797380,
-                                    price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797390,
-                                    price: Uint128::from(55_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797400,
-                                    price: Uint128::from(56_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797409,
-                                    price: Uint128::from(50_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797419,
-                                    price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797429,
-                                    price: Uint128::from(51_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797439,
-                                    price: Uint128::from(59_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797449,
-                                    price: Uint128::from(65_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797459,
-                                    price: Uint128::from(45_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797469,
-                                    price: Uint128::from(90_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797479,
-                                    price: Uint128::from(58_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797489,
-                                    price: Uint128::from(59_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797499,
-                                    price: Uint128::from(52_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                                OraclePriceFeedResponse {
-                                    timestamp: 1571797719,
-                                    price: Uint128::from(45_000_000u128),
-                                    worker: "rico".to_string(),
-                                },
-                            ],
-                        };
-                        SystemResult::Ok(ContractResult::from(to_binary(&msg_pool)))
+                    let msg_state = CumulativePricesResponse {
+                        assets: self.cumulative_price_response.clone().asset,
+                        total_share: self.cumulative_price_response.total_share,
+                        price0_cumulative_last: self
+                            .cumulative_price_response
+                            .price0_cumulative_last,
+                        price1_cumulative_last: self
+                            .cumulative_price_response
+                            .price1_cumulative_last,
                     };
+                    return SystemResult::Ok(ContractResult::from(to_binary(&msg_state)));
                 }
                 panic!("DO NOT ENTER HERE")
             }
@@ -205,12 +112,40 @@ impl WasmMockQuerier {
     pub fn new(base: MockQuerier<TerraQueryWrapper>) -> Self {
         WasmMockQuerier {
             base,
-            oracle_price_feed_response: OraclePriceFeedInfoResponse::default(),
+            cumulative_price_response: CumulativePriceInfoResponse::new(
+                [
+                    Asset {
+                        info: AssetInfo::NativeToken {
+                            denom: "uusd".to_string(),
+                        },
+                        amount: Uint128::from(86931615534331u128),
+                    },
+                    Asset {
+                        info: AssetInfo::NativeToken {
+                            denom: "uluna".to_string(),
+                        },
+                        amount: Uint128::from(1730767396012u128),
+                    },
+                ],
+                Uint128::from(11838366329935u128),
+                Uint128::from(73124950600u128),
+                Uint128::from(316483691189604u128),
+            ),
         }
     }
     // configure the mint whitelist mock querier
-    pub fn pool_token(&mut self, amount_native: Uint128, amount_token: Uint128) {
-        self.oracle_price_feed_response =
-            OraclePriceFeedInfoResponse::new(amount_native, amount_token)
+    pub fn pool_token(
+        &mut self,
+        asset: [Asset; 2],
+        total_share: Uint128,
+        price0_cumulative_last: Uint128,
+        price1_cumulative_last: Uint128,
+    ) {
+        self.cumulative_price_response = CumulativePriceInfoResponse::new(
+            asset,
+            total_share,
+            price0_cumulative_last,
+            price1_cumulative_last,
+        )
     }
 }

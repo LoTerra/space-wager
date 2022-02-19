@@ -35,7 +35,7 @@ pub struct Prediction {
     pub cumulative_last1: Option<Uint128>,
     pub block_time1: Option<u64>,
     pub cumulative_last2: Option<Uint128>,
-    pub block_time2: Option<u64>
+    pub block_time2: Option<u64>,
 }
 
 pub const PREDICTIONS: Map<&[u8], Prediction> = Map::new("predictions");

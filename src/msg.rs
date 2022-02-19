@@ -72,7 +72,7 @@ pub struct PredictionInfo {
     pub cumulative_last1: Option<Uint128>,
     pub block_time1: Option<u64>,
     pub cumulative_last2: Option<Uint128>,
-    pub block_time2: Option<u64>
+    pub block_time2: Option<u64>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MigrateMsg {}
@@ -86,12 +86,8 @@ pub enum AstroportQueryMsg {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub enum AssetInfo {
-    Token {
-        contract_addr: Addr,
-    },
-    NativeToken {
-        denom: String,
-    },
+    Token { contract_addr: Addr },
+    NativeToken { denom: String },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -106,4 +102,3 @@ pub struct CumulativePricesResponse {
     pub price0_cumulative_last: Uint128,
     pub price1_cumulative_last: Uint128,
 }
-
