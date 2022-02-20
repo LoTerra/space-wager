@@ -31,6 +31,14 @@ pub fn instantiate(
 ) -> Result<Response, ContractError> {
     let state = State { round: 0 };
 
+    // //Query the pool LUNA-UST Astroport Calculate the current price pool
+    let pool_info_msg = AstroportQueryMsg::CumulativePrices {};
+    let query = WasmQuery::Smart {
+        contract_addr: msg.pool_address.clone(),
+        msg: to_binary(&pool_info_msg)?,
+    };
+    let pool_info: CumulativePricesResponse = deps.querier.query(&query.into())?;
+
     let config = Config {
         pool_address: deps.api.addr_canonicalize(msg.pool_address.as_str())?,
         collector_address: deps.api.addr_canonicalize(msg.collector_address.as_str())?,
@@ -38,6 +46,8 @@ pub fn instantiate(
         limit_time: msg.limit_time,
         denom: msg.denom,
         collector_fee: msg.collector_fee,
+        start_cumulative_last1: Some(pool_info.price1_cumulative_last),
+        start_block_time1: Some(env.block.time.seconds())
     };
 
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -414,12 +424,33 @@ pub fn try_resolve_prediction(
             },
         )?;
     } else {
+        let price = if config.start_cumulative_last1.unwrap() > pool_info.price1_cumulative_last {
+            config.start_cumulative_last1.unwrap()
+                .checked_sub(pool_info.price1_cumulative_last)
+                .unwrap()
+        } else {
+            pool_info
+                .price1_cumulative_last
+                .checked_sub(config.start_cumulative_last1.unwrap())
+                .unwrap()
+        };
+        let block_time = env
+            .block
+            .time
+            .seconds()
+            .checked_sub(config.start_block_time1.unwrap())
+            .unwrap();
+
+        let predicted_price = Uint128::zero().multiply_ratio(price.u128(), block_time as u128);
+
         // Update locked price of the current prediction
         PREDICTIONS.update(
             deps.storage,
             &state.round.to_be_bytes(),
             |prediction| -> Result<_, ContractError> {
                 let mut update_prediction = prediction.unwrap();
+
+                update_prediction.locked_price = predicted_price;
                 update_prediction.cumulative_last1 = Some(pool_info.price1_cumulative_last);
                 update_prediction.block_time1 = Some(env.block.time.seconds());
 

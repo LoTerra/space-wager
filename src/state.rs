@@ -12,6 +12,8 @@ pub struct Config {
     pub limit_time: u64,
     pub denom: String,
     pub collector_fee: Decimal,
+    pub start_cumulative_last1: Option<Uint128>,
+    pub start_block_time1: Option<u64>,
 }
 pub const CONFIG: Item<Config> = Item::new("config");
 
