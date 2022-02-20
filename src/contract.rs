@@ -362,7 +362,7 @@ pub fn try_resolve_prediction(
                 .checked_sub(prediction.block_time1.unwrap())
                 .unwrap();
 
-            Uint128::zero().multiply_ratio(price.u128(), block_time as u128)
+            Uint128::from(1u128).multiply_ratio(price.u128(), block_time as u128)
         } else {
             Uint128::zero()
         };
@@ -441,7 +441,7 @@ pub fn try_resolve_prediction(
             .checked_sub(config.start_block_time1.unwrap())
             .unwrap();
 
-        let predicted_price = Uint128::zero().multiply_ratio(price.u128(), block_time as u128);
+        let predicted_price = Uint128::from(1u128).multiply_ratio(price.u128(), block_time as u128);
 
         // Update locked price of the current prediction
         PREDICTIONS.update(
