@@ -32,7 +32,7 @@ pub struct Prediction {
     pub resolved_price: Uint128,
     pub closing_time: u64,
     pub expire_time: u64,
-    pub success: bool,
+    pub success: Option<bool>,
     pub is_up: Option<bool>,
     pub cumulative_last1: Option<Uint128>,
     pub block_time1: Option<u64>,

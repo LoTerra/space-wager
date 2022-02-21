@@ -129,7 +129,7 @@ impl WasmMockQuerier {
                 ],
                 Uint128::from(11838366329935u128),
                 Uint128::from(73124950600u128),
-                Uint128::from(316483691189604u128),
+                Uint128::from(631586305808862u128),
             ),
         }
     }

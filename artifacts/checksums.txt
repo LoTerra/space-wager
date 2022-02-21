@@ -1,1 +1,1 @@
-deae8e373c057d9b4e5108bf63da1079032bd579a5ab173a0f40e567b3cef108  space_wager.wasm
+10853cb37fe15edbf9737fb842459625bf2dfdce1ab0aa7eb33e95a76c3caa6a  space_wager.wasm

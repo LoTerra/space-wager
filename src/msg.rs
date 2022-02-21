@@ -51,7 +51,7 @@ pub struct StateResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
-    pub oracle_price_feed_address: String,
+    pub pool_address: String,
     pub collector_address: String,
     pub round_time: u64,
     pub limit_time: u64,
@@ -85,6 +85,7 @@ pub enum AstroportQueryMsg {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum AssetInfo {
     Token { contract_addr: Addr },
     NativeToken { denom: String },

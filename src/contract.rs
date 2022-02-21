@@ -47,7 +47,7 @@ pub fn instantiate(
         denom: msg.denom,
         collector_fee: msg.collector_fee,
         start_cumulative_last1: Some(pool_info.price1_cumulative_last),
-        start_block_time1: Some(env.block.time.seconds())
+        start_block_time1: Some(env.block.time.seconds()),
     };
 
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -70,7 +70,7 @@ pub fn instantiate(
                 .plus_seconds(msg.round_time)
                 .plus_seconds(msg.limit_time)
                 .seconds(),
-            success: false,
+            success: None,
             is_up: None,
             cumulative_last1: None,
             block_time1: None,
@@ -205,7 +205,7 @@ pub fn try_resolve_game(
 
     for round_number in round {
         let prediction = PREDICTIONS.load(deps.storage, &round_number.to_be_bytes())?;
-        if prediction.expire_time > env.block.time.seconds() {
+        if prediction.expire_time > env.block.time.seconds() || prediction.success.is_none() {
             return Err(ContractError::PredictionStillInProgress {});
         }
 
@@ -215,7 +215,7 @@ pub fn try_resolve_game(
         }
 
         let mut round_prize = Uint128::zero();
-        if prediction.success {
+        if prediction.success.unwrap() {
             if let Some(is_up) = prediction.is_up {
                 if is_up {
                     if !game.up.is_zero() {
@@ -307,7 +307,6 @@ pub fn try_resolve_game(
     Ok(res)
 }
 
-const MAX_LIMIT_QUERY: u32 = 30;
 pub fn try_resolve_prediction(
     deps: DepsMut,
     env: Env,
@@ -335,37 +334,34 @@ pub fn try_resolve_prediction(
     if state.round != 0 {
         let prediction = PREDICTIONS.load(deps.storage, &(state.round - 1).to_be_bytes())?;
         // Check if not expired and prediction up and down are not zero
+
+        let price = if prediction.cumulative_last1.unwrap() > pool_info.price1_cumulative_last {
+            prediction
+                .cumulative_last1
+                .unwrap()
+                .checked_sub(pool_info.price1_cumulative_last)
+                .unwrap()
+        } else {
+            pool_info
+                .price1_cumulative_last
+                .checked_sub(prediction.cumulative_last1.unwrap())
+                .unwrap()
+        };
+        let block_time = env
+            .block
+            .time
+            .seconds()
+            .checked_sub(prediction.block_time1.unwrap())
+            .unwrap();
+
+        let predicted_price = Uint128::from(1u128).multiply_ratio(price.u128(), block_time as u128);
+
         let is_success = env.block.time.seconds() < prediction.expire_time
             && !prediction.up.is_zero()
             && !prediction.down.is_zero()
             && prediction.cumulative_last1.is_some()
             && prediction.block_time1.is_some()
-            && prediction.cumulative_last1.unwrap() != pool_info.price1_cumulative_last;
-
-        let predicted_price = if is_success {
-            let price = if prediction.cumulative_last1.unwrap() > pool_info.price1_cumulative_last {
-                prediction
-                    .cumulative_last1
-                    .unwrap()
-                    .checked_sub(pool_info.price1_cumulative_last)
-                    .unwrap()
-            } else {
-                pool_info
-                    .price1_cumulative_last
-                    .checked_sub(prediction.cumulative_last1.unwrap())
-                    .unwrap()
-            };
-            let block_time = env
-                .block
-                .time
-                .seconds()
-                .checked_sub(prediction.block_time1.unwrap())
-                .unwrap();
-
-            Uint128::from(1u128).multiply_ratio(price.u128(), block_time as u128)
-        } else {
-            Uint128::zero()
-        };
+            && predicted_price != prediction.locked_price;
 
         let is_up = predicted_price > prediction.locked_price;
         // Update the current prediction
@@ -376,11 +372,11 @@ pub fn try_resolve_prediction(
                 let mut update_prediction = prediction.unwrap();
                 if is_success {
                     update_prediction.is_up = Some(is_up);
-                    update_prediction.resolved_price = predicted_price;
                 }
+                update_prediction.resolved_price = predicted_price;
                 update_prediction.block_time2 = Some(env.block.time.seconds());
                 update_prediction.cumulative_last2 = Some(pool_info.price1_cumulative_last);
-                update_prediction.success = is_success;
+                update_prediction.success = Some(is_success);
                 Ok(update_prediction)
             },
         )?;
@@ -425,7 +421,9 @@ pub fn try_resolve_prediction(
         )?;
     } else {
         let price = if config.start_cumulative_last1.unwrap() > pool_info.price1_cumulative_last {
-            config.start_cumulative_last1.unwrap()
+            config
+                .start_cumulative_last1
+                .unwrap()
                 .checked_sub(pool_info.price1_cumulative_last)
                 .unwrap()
         } else {
@@ -442,7 +440,7 @@ pub fn try_resolve_prediction(
             .unwrap();
 
         let predicted_price = Uint128::from(1u128).multiply_ratio(price.u128(), block_time as u128);
-
+        println!("predicted price : {} {} ", price, block_time);
         // Update locked price of the current prediction
         PREDICTIONS.update(
             deps.storage,
@@ -482,7 +480,7 @@ pub fn try_resolve_prediction(
                 .plus_seconds(config.round_time)
                 .plus_seconds(config.limit_time)
                 .seconds(),
-            success: false,
+            success: None,
             is_up: None,
             cumulative_last1: None,
             block_time1: None,
@@ -514,7 +512,7 @@ fn query_state(deps: Deps) -> StdResult<StateResponse> {
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
-        oracle_price_feed_address: deps.api.addr_humanize(&config.pool_address)?.to_string(),
+        pool_address: deps.api.addr_humanize(&config.pool_address)?.to_string(),
         collector_address: deps
             .api
             .addr_humanize(&config.collector_address)?
@@ -616,7 +614,7 @@ mod tests {
                 .plus_seconds(30)
                 .seconds()
         );
-        assert!(!prediction.success);
+        assert_eq!(prediction.success, None);
         assert_eq!(prediction.is_up, None);
         assert_eq!(prediction.locked_price, Uint128::zero());
         // it worked, let's query the state
@@ -784,25 +782,6 @@ mod tests {
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
-        deps.querier.pool_token(
-            [
-                Asset {
-                    info: AssetInfo::NativeToken {
-                        denom: "uusd".to_string(),
-                    },
-                    amount: Uint128::from(87049666749971u128),
-                },
-                Asset {
-                    info: AssetInfo::NativeToken {
-                        denom: "uluna".to_string(),
-                    },
-                    amount: Uint128::from(1728618730356u128),
-                },
-            ],
-            Uint128::from(11839025025386u128),
-            Uint128::from(73221779133u128),
-            Uint128::from(316728527698964u128),
-        );
         // Player1 enter down
         let msg = ExecuteMsg::MakePrediction { up: false };
         let info = mock_info(
@@ -850,11 +829,31 @@ mod tests {
         let config = CONFIG.load(deps.as_ref().storage).unwrap();
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(config.round_time);
+        deps.querier.pool_token(
+            [
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "uusd".to_string(),
+                    },
+                    amount: Uint128::from(87049666749971u128),
+                },
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "uluna".to_string(),
+                    },
+                    amount: Uint128::from(1728618730356u128),
+                },
+            ],
+            Uint128::from(11839025025386u128),
+            Uint128::from(74567024955u128),
+            Uint128::from(631593960542710u128),
+        );
         let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
         assert_eq!(
             res.attributes,
             vec![Attribute::new("action", "resolve_prediction")]
         );
+
         // assert_eq!(
         //     res.attributes,
         //     vec![
@@ -886,8 +885,29 @@ mod tests {
 
         // Resolve
         env.block.time = env.block.time.plus_seconds(config.round_time);
+        deps.querier.pool_token(
+            [
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "uusd".to_string(),
+                    },
+                    amount: Uint128::from(87049666749971u128),
+                },
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "uluna".to_string(),
+                    },
+                    amount: Uint128::from(1728618730356u128),
+                },
+            ],
+            Uint128::from(11839025025386u128),
+            Uint128::from(74577424168u128),
+            Uint128::from(631602590004212u128),
+        );
         let msg = ExecuteMsg::ResolvePrediction {};
         let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
+        let prediction = query_prediction(deps.as_ref(), 0).unwrap();
+        println!("{:?}", prediction);
         assert_eq!(
             res.attributes,
             vec![
@@ -921,13 +941,13 @@ mod tests {
                 amount: Uint128::from(500_000_000u128),
             }],
         );
-        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-        println!("{:?}", res);
 
         // Resolve
         env.block.time = env.block.time.plus_seconds(config.round_time);
         let msg = ExecuteMsg::ResolvePrediction {};
         let res = execute(deps.as_mut(), env, mock_info("bot", &[]), msg).unwrap();
+        let prediction = query_prediction(deps.as_ref(), 0).unwrap();
+        println!("{:?}", prediction);
         println!("{:?}", res);
         assert_eq!(
             res.attributes,
