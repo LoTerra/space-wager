@@ -108,6 +108,27 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "Query player stats",
+      "type": "object",
+      "required": [
+        "player"
+      ],
+      "properties": {
+        "player": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ]
 }

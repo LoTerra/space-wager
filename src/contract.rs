@@ -10,12 +10,15 @@ use std::convert::TryInto;
 use std::ops::{Add, Mul, Sub};
 
 use crate::error::ContractError;
+use crate::helpers::update_player;
 use crate::msg::{
     AstroportQueryMsg, ConfigResponse, CumulativePricesResponse, ExecuteMsg, InstantiateMsg,
     MigrateMsg, QueryMsg, StateResponse,
 };
 
-use crate::state::{Config, Game, Prediction, State, CONFIG, GAMES, PREDICTIONS, STATE};
+use crate::state::{
+    Config, Game, Player, Prediction, State, CONFIG, GAMES, PLAYERS, PREDICTIONS, STATE,
+};
 use crate::taxation::deduct_tax;
 
 // version info for migration info
@@ -209,7 +212,10 @@ pub fn try_resolve_game(
             return Err(ContractError::PredictionStillInProgress {});
         }
 
-        let game = GAMES.load(deps.storage, (&raw_address, &round_number.to_be_bytes()))?;
+        let game = GAMES.load(
+            deps.storage,
+            (&raw_address.as_slice(), &round_number.to_be_bytes()),
+        )?;
         if game.resolved {
             return Err(ContractError::AlreadyResolved {});
         }
@@ -226,6 +232,8 @@ pub fn try_resolve_game(
                         let payout = game.up.mul(up_ratio);
                         round_prize = payout;
                         prize_amount += payout;
+                        // Save player stats
+                        update_player(deps.storage, &raw_address, payout)?;
                     }
                 } else {
                     if !game.down.is_zero() {
@@ -236,6 +244,8 @@ pub fn try_resolve_game(
                         let payout = game.down.mul(down_ratio);
                         round_prize = payout;
                         prize_amount += payout;
+                        // Save player stats
+                        update_player(deps.storage, &raw_address, payout)?;
                     }
                 }
             }
@@ -248,7 +258,7 @@ pub fn try_resolve_game(
         // Update game as resolved
         GAMES.update(
             deps.storage,
-            (&raw_address, &round_number.to_be_bytes()),
+            (&raw_address.as_slice(), &round_number.to_be_bytes()),
             |game| -> Result<_, ContractError> {
                 let mut update_game = game.unwrap();
                 update_game.resolved = true;
@@ -440,7 +450,7 @@ pub fn try_resolve_prediction(
             .unwrap();
 
         let predicted_price = Uint128::from(1u128).multiply_ratio(price.u128(), block_time as u128);
-        println!("predicted price : {} {} ", price, block_time);
+
         // Update locked price of the current prediction
         PREDICTIONS.update(
             deps.storage,
@@ -502,6 +512,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Predictions { start_after, limit } => {
             to_binary(&query_predictions(deps, start_after, limit)?)
         }
+        QueryMsg::Player { address } => to_binary(&query_player(deps, address)?),
     }
 }
 
@@ -556,6 +567,19 @@ fn query_predictions(
         })
         .collect::<StdResult<Vec<(u64, Prediction)>>>()?;
     Ok(prediction)
+}
+
+fn query_player(deps: Deps, address: String) -> StdResult<Player> {
+    let raw_address = deps.api.addr_canonicalize(&address.as_str())?;
+    let player = PLAYERS
+        .load(deps.storage, &raw_address.as_slice())
+        .unwrap_or(Player {
+            game_won: 0,
+            game_over: 0,
+            game_rewards: Uint128::zero(),
+        });
+
+    Ok(player)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

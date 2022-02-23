@@ -51,3 +51,12 @@ pub struct Game {
 }
 
 pub const GAMES: Map<(&[u8], &[u8]), Game> = Map::new("games");
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Player {
+    pub game_won: u64,
+    pub game_over: u64,
+    pub game_rewards: Uint128,
+}
+
+pub const PLAYERS: Map<&[u8], Player> = Map::new("players");

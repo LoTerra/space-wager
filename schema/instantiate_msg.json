@@ -4,7 +4,7 @@
   "type": "object",
   "required": [
     "collector_address",
-    "collector_ratio",
+    "collector_fee",
     "denom",
     "limit_time",
     "pool_address",
@@ -14,7 +14,7 @@
     "collector_address": {
       "type": "string"
     },
-    "collector_ratio": {
+    "collector_fee": {
       "$ref": "#/definitions/Decimal"
     },
     "denom": {

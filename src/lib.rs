@@ -4,6 +4,7 @@ pub mod msg;
 pub mod state;
 mod taxation;
 
+mod helpers;
 #[cfg(test)]
 mod mock_querier;
 
