@@ -233,16 +233,25 @@ pub fn try_resolve_game(
                         round_prize = payout;
                         prize_amount += payout;
 
-                        let rewards_earn = if payout > game.up {
-                            payout.checked_sub(game.up).unwrap()
+                        let total_play = game.up.checked_add(game.down).unwrap();
+                        let (rewards_earn, is_profit) = if payout > total_play {
+                            (payout.checked_sub(total_play).unwrap(), true)
                         } else {
-                            game.up.checked_sub(payout).unwrap()
+                            (total_play.checked_sub(payout).unwrap(), false)
                         };
                         // Save player stats
-                        update_player(deps.storage, &raw_address, rewards_earn)?;
-                    } else {
+                        update_player(
+                            deps.storage,
+                            &raw_address,
+                            rewards_earn,
+                            true,
+                            Some(is_profit),
+                        )?;
+                    }
+
+                    if !game.down.is_zero() {
                         // Save player stats
-                        update_player(deps.storage, &raw_address, Uint128::zero())?;
+                        update_player(deps.storage, &raw_address, Uint128::zero(), false, None)?;
                     }
                 } else {
                     if !game.down.is_zero() {
@@ -254,16 +263,26 @@ pub fn try_resolve_game(
                         round_prize = payout;
                         prize_amount += payout;
 
-                        let rewards_earn = if payout > game.down {
-                            payout.checked_sub(game.down).unwrap()
+                        let total_play = game.down.checked_add(game.up).unwrap();
+
+                        let (rewards_earn, is_profit) = if payout > total_play {
+                            (payout.checked_sub(total_play).unwrap(), true)
                         } else {
-                            game.down.checked_sub(payout).unwrap()
+                            (total_play.checked_sub(payout).unwrap(), false)
                         };
                         // Save player stats
-                        update_player(deps.storage, &raw_address, rewards_earn)?;
-                    } else {
+                        update_player(
+                            deps.storage,
+                            &raw_address,
+                            rewards_earn,
+                            true,
+                            Some(is_profit),
+                        )?;
+                    }
+
+                    if !game.up.is_zero() {
                         // Save player stats
-                        update_player(deps.storage, &raw_address, Uint128::zero())?;
+                        update_player(deps.storage, &raw_address, Uint128::zero(), false, None)?;
                     }
                 }
             }
