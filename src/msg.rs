@@ -66,6 +66,32 @@ pub struct ConfigResponse {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct GameResponse {
+    pub up: Uint128,
+    pub down: Uint128,
+    pub prize: Uint128,
+    pub resolved: bool,
+    pub game_id: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct PredictionResponse {
+    pub up: Uint128,
+    pub down: Uint128,
+    pub locked_price: Uint128,
+    pub resolved_price: Uint128,
+    pub closing_time: u64,
+    pub expire_time: u64,
+    pub success: Option<bool>,
+    pub is_up: Option<bool>,
+    pub cumulative_last1: Option<Uint128>,
+    pub block_time1: Option<u64>,
+    pub cumulative_last2: Option<Uint128>,
+    pub block_time2: Option<u64>,
+    pub prediction_id: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct PredictionInfo {
     pub up: Uint128,
     pub down: Uint128,

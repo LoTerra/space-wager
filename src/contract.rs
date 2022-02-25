@@ -12,8 +12,8 @@ use std::ops::{Add, Mul, Sub};
 use crate::error::ContractError;
 use crate::helpers::update_player;
 use crate::msg::{
-    AstroportQueryMsg, ConfigResponse, CumulativePricesResponse, ExecuteMsg, InstantiateMsg,
-    MigrateMsg, QueryMsg, StateResponse,
+    AstroportQueryMsg, ConfigResponse, CumulativePricesResponse, ExecuteMsg, GameResponse,
+    InstantiateMsg, MigrateMsg, PredictionResponse, QueryMsg, StateResponse,
 };
 
 use crate::state::{
@@ -576,20 +576,34 @@ fn query_predictions(
     deps: Deps,
     start_after: Option<u64>,
     limit: Option<u32>,
-) -> StdResult<Vec<(u64, Prediction)>> {
+) -> StdResult<Vec<PredictionResponse>> {
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
     let start = start_after.map(|d| Bound::Exclusive(d.to_be_bytes().to_vec()));
 
-    let prediction = PREDICTIONS
+    let predictions = PREDICTIONS
         .range(deps.storage, start, None, Order::Ascending)
         .take(limit)
         .map(|pair| {
             pair.and_then(|(k, prediction)| {
-                Ok((u64::from_be_bytes(k.try_into().unwrap()), prediction))
+                Ok(PredictionResponse {
+                    up: prediction.up,
+                    down: prediction.down,
+                    locked_price: prediction.locked_price,
+                    resolved_price: prediction.resolved_price,
+                    closing_time: prediction.closing_time,
+                    expire_time: prediction.expire_time,
+                    success: prediction.success,
+                    is_up: prediction.is_up,
+                    cumulative_last1: prediction.cumulative_last1,
+                    block_time1: prediction.block_time1,
+                    cumulative_last2: prediction.cumulative_last2,
+                    block_time2: prediction.block_time2,
+                    prediction_id: u64::from_be_bytes(k.try_into().unwrap()),
+                })
             })
         })
-        .collect::<StdResult<Vec<(u64, Prediction)>>>()?;
-    Ok(prediction)
+        .collect::<StdResult<Vec<PredictionResponse>>>()?;
+    Ok(predictions)
 }
 
 fn query_games(
@@ -597,7 +611,7 @@ fn query_games(
     player: String,
     start_after: Option<u64>,
     limit: Option<u32>,
-) -> StdResult<Vec<(u64, Game)>> {
+) -> StdResult<Vec<GameResponse>> {
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
     let start = start_after.map(|d| Bound::Exclusive(d.to_be_bytes().to_vec()));
 
@@ -608,9 +622,17 @@ fn query_games(
         .range(deps.storage, None, start, Order::Descending)
         .take(limit)
         .map(|pair| {
-            pair.and_then(|(k, game)| Ok((u64::from_be_bytes(k.try_into().unwrap()), game)))
+            pair.and_then(|(k, game)| {
+                Ok(GameResponse {
+                    up: game.up,
+                    down: game.down,
+                    prize: game.prize,
+                    resolved: game.resolved,
+                    game_id: u64::from_be_bytes(k.try_into().unwrap()),
+                })
+            })
         })
-        .collect::<StdResult<Vec<(u64, Game)>>>()?;
+        .collect::<StdResult<Vec<GameResponse>>>()?;
 
     Ok(games)
 }
