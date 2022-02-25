@@ -40,8 +40,13 @@ pub enum QueryMsg {
         limit: Option<u32>,
     },
     /// Query player stats
-    Player { address: String }, // /// Retrieve all games
-                                // Games { start_after: Option<u64>, limit: Option<u64> }
+    Player { address: String },
+    /// Retrieve all games
+    Games {
+        player: String,
+        start_after: Option<u64>,
+        limit: Option<u32>,
+    },
 }
 
 // We define a custom struct for each query response

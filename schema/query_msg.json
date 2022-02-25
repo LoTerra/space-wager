@@ -129,6 +129,43 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "Retrieve all games",
+      "type": "object",
+      "required": [
+        "games"
+      ],
+      "properties": {
+        "games": {
+          "type": "object",
+          "required": [
+            "player"
+          ],
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "player": {
+              "type": "string"
+            },
+            "start_after": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ]
 }

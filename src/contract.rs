@@ -232,8 +232,17 @@ pub fn try_resolve_game(
                         let payout = game.up.mul(up_ratio);
                         round_prize = payout;
                         prize_amount += payout;
+
+                        let rewards_earn = if payout > game.up {
+                            payout.checked_sub(game.up).unwrap()
+                        } else {
+                            game.up.checked_sub(payout).unwrap()
+                        };
                         // Save player stats
-                        update_player(deps.storage, &raw_address, payout)?;
+                        update_player(deps.storage, &raw_address, rewards_earn)?;
+                    } else {
+                        // Save player stats
+                        update_player(deps.storage, &raw_address, Uint128::zero())?;
                     }
                 } else {
                     if !game.down.is_zero() {
@@ -244,8 +253,17 @@ pub fn try_resolve_game(
                         let payout = game.down.mul(down_ratio);
                         round_prize = payout;
                         prize_amount += payout;
+
+                        let rewards_earn = if payout > game.down {
+                            payout.checked_sub(game.down).unwrap()
+                        } else {
+                            game.down.checked_sub(payout).unwrap()
+                        };
                         // Save player stats
-                        update_player(deps.storage, &raw_address, payout)?;
+                        update_player(deps.storage, &raw_address, rewards_earn)?;
+                    } else {
+                        // Save player stats
+                        update_player(deps.storage, &raw_address, Uint128::zero())?;
                     }
                 }
             }
@@ -513,6 +531,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             to_binary(&query_predictions(deps, start_after, limit)?)
         }
         QueryMsg::Player { address } => to_binary(&query_player(deps, address)?),
+        QueryMsg::Games {
+            player,
+            start_after,
+            limit,
+        } => to_binary(&query_games(deps, player, start_after, limit)?),
     }
 }
 
@@ -567,6 +590,29 @@ fn query_predictions(
         })
         .collect::<StdResult<Vec<(u64, Prediction)>>>()?;
     Ok(prediction)
+}
+
+fn query_games(
+    deps: Deps,
+    player: String,
+    start_after: Option<u64>,
+    limit: Option<u32>,
+) -> StdResult<Vec<(u64, Game)>> {
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+    let start = start_after.map(|d| Bound::Exclusive(d.to_be_bytes().to_vec()));
+
+    let owner_addr = deps.api.addr_validate(&player)?;
+    let raw_address = deps.api.addr_canonicalize(&owner_addr.as_str())?;
+    let games = GAMES
+        .prefix(raw_address.as_slice())
+        .range(deps.storage, None, start, Order::Descending)
+        .take(limit)
+        .map(|pair| {
+            pair.and_then(|(k, game)| Ok((u64::from_be_bytes(k.try_into().unwrap()), game)))
+        })
+        .collect::<StdResult<Vec<(u64, Game)>>>()?;
+
+    Ok(games)
 }
 
 fn query_player(deps: Deps, address: String) -> StdResult<Player> {
