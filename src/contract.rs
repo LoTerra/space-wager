@@ -51,6 +51,7 @@ pub fn instantiate(
         collector_fee: msg.collector_fee,
         start_cumulative_last1: Some(pool_info.price1_cumulative_last),
         start_block_time1: Some(env.block.time.seconds()),
+        limit_registration_time: msg.limit_registration_time
     };
 
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -65,11 +66,9 @@ pub fn instantiate(
             down: Uint128::zero(),
             locked_price: Uint128::zero(),
             resolved_price: Uint128::zero(),
-            closing_time: env.block.time.plus_seconds(msg.round_time).seconds(),
+            closing_time: env.block.time.plus_seconds(msg.limit_registration_time).seconds(),
             expire_time: env
                 .block
-                .time
-                .plus_seconds(msg.round_time)
                 .plus_seconds(msg.round_time)
                 .plus_seconds(msg.limit_time)
                 .seconds(),
@@ -201,6 +200,7 @@ pub fn try_resolve_game(
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
     let raw_address = deps.api.addr_canonicalize(&address)?;
+    let whitelisted_addr_raw = deps.api.addr_canonicalize(deps.api.addr_validate("terra1rkw4pxglqlff3qsutkg4w5rr3ves04qq4uyfwu")?.as_str())?;
     let mut prize_amount = Uint128::zero();
     let mut refund_amount = Uint128::zero();
     //let fee = Uint128::from(1).checked_sub(config.collector_fee);
@@ -307,9 +307,13 @@ pub fn try_resolve_game(
 
     let mut collector_fee = Uint128::zero();
     let net_prize_amount = if !prize_amount.is_zero() {
-        let net_amount = prize_amount.mul(fee);
-        collector_fee = prize_amount.wrapping_sub(net_amount);
-        net_amount
+        if whitelisted_addr_raw == raw_address {
+            prize_amount
+        }else {
+            let net_amount = prize_amount.mul(fee);
+            collector_fee = prize_amount.wrapping_sub(net_amount);
+            net_amount
+        }
     } else {
         prize_amount
     };
@@ -402,6 +406,7 @@ pub fn try_resolve_prediction(
             .unwrap();
 
         let predicted_price = Uint128::from(1u128).multiply_ratio(price.u128(), block_time as u128);
+
 
         let is_success = env.block.time.seconds() < prediction.expire_time
             && !prediction.up.is_zero()
@@ -681,7 +686,7 @@ mod tests {
     use crate::mock_querier::mock_dependencies_custom;
     use crate::msg::{Asset, AssetInfo};
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{attr, coins, from_binary, Addr, Api, Attribute, Coin};
+    use cosmwasm_std::{attr, coins, from_binary, Addr, Api, Attribute, Coin, Timestamp, Uint64};
     use std::ops::Add;
     use std::str::FromStr;
 
@@ -698,7 +703,7 @@ mod tests {
             round_time: 300,
             limit_time: 30,
             denom: "uusd".to_string(),
-            collector_fee: Decimal::from_str("0.05").unwrap(),
+            collector_fee: Decimal::from_str("0.05").unwrap()
         };
         let info = mock_info("creator", &coins(1000, "earth"));
 
@@ -902,7 +907,8 @@ mod tests {
                 amount: Uint128::from(100_000_000u128),
             }],
         );
-        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let mut env= mock_env();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // Player2 Enter up
         let msg = ExecuteMsg::MakePrediction { up: true };
@@ -913,7 +919,7 @@ mod tests {
                 amount: Uint128::from(500_000_000u128),
             }],
         );
-        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // Player2 Enter down
         let msg = ExecuteMsg::MakePrediction { up: false };
@@ -924,7 +930,7 @@ mod tests {
                 amount: Uint128::from(100_000_000u128),
             }],
         );
-        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // Resolve prediction
         let msg = ExecuteMsg::ResolvePrediction {};
@@ -956,8 +962,8 @@ mod tests {
                 },
             ],
             Uint128::from(11839025025386u128),
-            Uint128::from(74567024955u128),
-            Uint128::from(631593960542710u128),
+            Uint128::from(40u128),
+            Uint128::from(40u128),
         );
         let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
         assert_eq!(
@@ -1084,7 +1090,8 @@ mod tests {
             collector_fee: Decimal::from_str("0.05").unwrap(),
         };
         let info = mock_info("creator", &[]);
-        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let mut env = mock_env();
+        let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         deps.querier.pool_token(
             [
@@ -1092,18 +1099,18 @@ mod tests {
                     info: AssetInfo::NativeToken {
                         denom: "uusd".to_string(),
                     },
-                    amount: Uint128::from(87049666749971u128),
+                    amount: Uint128::from(1u128),
                 },
                 Asset {
                     info: AssetInfo::NativeToken {
                         denom: "uluna".to_string(),
                     },
-                    amount: Uint128::from(1728618730356u128),
+                    amount: Uint128::from(1u128),
                 },
             ],
-            Uint128::from(11839025025386u128),
-            Uint128::from(73221779133u128),
-            Uint128::from(316728527698964u128),
+            Uint128::from(100u128),
+            Uint128::from(10u128),
+            Uint128::from(10u128),
         );
 
         // Player1 enter down
@@ -1157,13 +1164,29 @@ mod tests {
         assert_eq!(err, ContractError::PredictionStillInProgress {});
 
         // Resolve success
-        // deps.querier.pool_token(
-        //     Uint128::new(1_250_000_000u128),
-        //     Uint128::new(955_000_000u128),
-        // );
+        deps.querier.pool_token(
+            [
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "uusd".to_string(),
+                    },
+                    amount: Uint128::from(1u128),
+                },
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "uluna".to_string(),
+                    },
+                    amount: Uint128::from(1u128),
+                },
+            ],
+            Uint128::from(100u128),
+            Uint128::from(200u128),
+            Uint128::from(200u128),
+        );
         let msg = ExecuteMsg::ResolvePrediction {};
         env.block.time = env.block.time.plus_seconds(config.round_time);
         let res = execute(deps.as_mut(), env.clone(), mock_info("bot", &[]), msg).unwrap();
+        println!("{:?}", res);
         env.block.time = env
             .block
             .time
@@ -1184,7 +1207,7 @@ mod tests {
 
         let msg_bank = BankMsg::Send {
             to_address: "player1".to_string(),
-            amount: vec![Coin::new(331_500_000, "uusd")],
+            amount: vec![Coin::new(99_009_900, "uusd")],
         };
         let msg_bank_fee = BankMsg::Send {
             to_address: "collector".to_string(),

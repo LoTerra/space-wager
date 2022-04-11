@@ -10,6 +10,7 @@ pub struct InstantiateMsg {
     pub limit_time: u64,
     pub denom: String,
     pub collector_fee: Decimal,
+    pub limit_registration_time: u64
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

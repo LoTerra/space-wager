@@ -14,6 +14,7 @@ pub struct Config {
     pub collector_fee: Decimal,
     pub start_cumulative_last1: Option<Uint128>,
     pub start_block_time1: Option<u64>,
+    pub limit_registration_time: u64
 }
 pub const CONFIG: Item<Config> = Item::new("config");
 
