@@ -92,7 +92,14 @@ pub struct PredictionResponse {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct MigrateMsg {}
+pub struct MigrateMsg {
+    pub update_collector_address: String,
+    pub update_pool_address: String,
+    pub update_round_time: u64,
+    pub update_limit_time: u64,
+    pub update_denom: String,
+    pub update_collector_fee: Decimal,
+}
 
 // Astroport
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

@@ -670,7 +670,21 @@ fn query_player(deps: Deps, address: String) -> StdResult<Player> {
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> StdResult<Response> {
+    let mut config = CONFIG.load(deps.storage)?;
+
+    config.collector_address = deps
+        .api
+        .addr_canonicalize(msg.update_collector_address.as_str())?;
+    config.pool_address = deps
+        .api
+        .addr_canonicalize(msg.update_pool_address.as_str())?;
+    config.denom = msg.update_denom;
+    config.collector_fee = msg.update_collector_fee;
+    config.limit_time = msg.update_limit_time;
+    config.round_time = msg.update_round_time;
+
+    CONFIG.save(deps.storage, &config)?;
     Ok(Response::default())
 }
 
